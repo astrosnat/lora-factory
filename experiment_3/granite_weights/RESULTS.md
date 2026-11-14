@@ -95,6 +95,14 @@ part W = 4 B A0 and the learned-read part L = 4 B (A - A0):
   one LoRA's energy (25% in layers 24-31, 14% in layers 0-7), 13 times the 1.48% that seeds share directly. It is a
   lower bound on the common part. In one sentence: a single LoRA is about one fifth the common update seen through
   its own random window and four fifths something else.
+  **Corrected after publication (2026-11-11, many-loras-3e; confirmed by the referee with independent features,
+  `team/many-loras-39/FINDINGS.md` section 21): "one fifth" was a loose lower bound.** It used the whole mean update
+  as stand-in for the common update. Measured with the mean of the window part itself: of the window part of a
+  LoRA's update, at least about one third is the common update seen through the LoRA's own start window (gate_up:
+  about one fifth). In v, o and down this share rises with depth to more than half in layers 24-31. By layer band
+  (0-7 / 8-16 / 17-23 / 24-31): q 0.32 / 0.34 / 0.31 / 0.42; k 0.32 / 0.34 / 0.34 / 0.45; v 0.34 / 0.43 / 0.52 /
+  0.59; o 0.33 / 0.40 / 0.48 / 0.57; down 0.31 / 0.31 / 0.37 / 0.53; gate_up 0.22 / 0.21 / 0.23 / 0.31. These are
+  lower bounds too: only the part that is linear in the window is counted.
 - Not available: the dense means of L and of W as tensors (their save stalled at the VM's memory limit and was
   stopped), so the spectrum and the lens of the window part's mean are left for the second phase. The numbers above
   come from per-LoRA quantities and do not depend on them.
@@ -227,6 +235,15 @@ correlation is the fair summary.
   there. So: strong LoRAs have a larger update outside the common-through-the-window part everywhere, and in the
   attention output of layers 17-23 their read side has learned more of the shared update. (Train folds; explains
   differences only.)
+- **A real direction of strength, tested with no fitting.** A LoRA's dose along the label-weighted sum of 1,520
+  other LoRAs' updates (centred; the LoRA itself not in the sum) predicts its judged rate at r 0.41 [0.33, 0.48]
+  (leak 0.27, short 0.44; shuffled labels 0.01), and from the attention output alone at 0.56. By depth: layers 17-23
+  0.49, layers 8-16 0.37, layers 24-31 0.28, layers 0-7 0.17 (per-band numbers are descriptive: a shuffled sum
+  reaches 0.22 in layers 17-23).
+- **The energy share of the learned-read part per module** (2,688 numbers) is the best single block: 0.62 / 0.54 /
+  0.68 for judged, leak, short, and +0.075 [0.052, 0.099] / +0.066 / +0.047 on top of the sizes; it sits in down and
+  o, not in q, k, v. bb's independent run of the window-part-against-rest test agrees with the referee's (the
+  coefficient adds +0.003 judged on top of the rest; the rest adds +0.24 on top of the coefficient).
 
 ## 6. Causal by design: what the seed fixes (C)
 - **The starting window decides each module's share of the shared update.** Over 2,000 LoRAs, the overlap of the
@@ -293,3 +310,10 @@ shared update was a centring artefact (0.034 after centring); "strength sits in 
 for direction; the imperial-minus-modern difference of 500 LoRAs was barely above its placebo and was not
 interpreted until the full means were in; a cross-validated effect of the starting window in early attention
 failed on the holdout.
+
+After publication (2026-11-11, during the model phase, `PHASE2.md`):
+- "A LoRA is about one fifth the common update through its start window" was a loose lower bound; the measured
+  share of the window part is at least one third, and more than half in v, o and down of layers 24-31 (section 2).
+- "Natural extra size is about 4 times less potent than a uniform scale-up" (a first reading of round 1 of the
+  model phase) was withdrawn: with the pattern of sizes over layers and module types held fixed, natural size
+  predicts name leak and the judged rate as strongly as scaling does (`PHASE2.md`, round 1, point 6).

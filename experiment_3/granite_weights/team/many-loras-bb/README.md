@@ -3,8 +3,8 @@
 Question from the user: what separates a strong LoRA from a weak one, read from the weights alone?
 3,000 Granite LoRAs (2,400 imperial, 600 modern) that differ only in their seed. No forward passes.
 
-Status: pass-1 features analysed; pass-2 features (the split of each update into its window part and the rest)
-not yet in. Everything below is cross-validated on the TRAIN LoRAs (chunks 0-59), and **the two headline models
+Status: pass-1 and pass-2 features analysed (pass 2 at 18:50 UTC, section 6); round 1 of the model runs read
+against the size model at 22:45 UTC (section 7). Everything below is cross-validated on the TRAIN LoRAs (chunks 0-59), and **the two headline models
 were confirmed once on the 480 untouched holdout LoRAs** (chunks 60-74; scored by the referee at 17:21 UTC).
 
 ## Holdout confirmation (scored once by many-loras-39, predictions frozen beforehand)
@@ -38,8 +38,24 @@ resolved. This explains differences between LoRAs; it is not a cause.
    directions have cosines 0.67-0.92). The imperial-word rate is a separate axis that runs against short answers.
    The judged rate beyond leak and short answers (14% of its variance) is barely predictable (r 0.10).
 5. **No single layer is needed** to tell strong from weak: dropping any one layer changes nothing detectable.
-6. This explains differences between LoRAs. It does not show cause: nothing randomised (the starting window, the
-   data order) moves the size enough to test it. Candidate tests with the model running are listed at the end.
+6. **The extra size of a strong LoRA is run-specific update, not more of the common update** (pass 2). The part
+   of a module's update that the common update predicts through the LoRA's own starting window is 11-27% of its
+   energy; strength goes with the rest, in every module type. And the second ingredient is on the learned side
+   of the read matrix: how far A has turned towards what all LoRAs read.
+7. **There is a real direction of strength.** A LoRA's dose along the label-weighted sum of 1,520 other LoRAs'
+   updates predicts its judged rate at r 0.41 with no fitting (shuffled labels: 0.01); from the attention output
+   alone at 0.56.
+8. Sections 1-6 explain differences between LoRAs; they do not show cause, because nothing randomised (the
+   starting window, the data order) moves the size enough to test it.
+9. **With the model running (round 1, section 7): size is a cause, and the size model predicts how large the
+   effect is.** Scaling whole LoRAs moved name leak by +33.5 points per unit of log energy, the judged rate by
+   +23.9 and short answers by +28.9. The plain link with total size across LoRAs is 3 to 4 times weaker. But the
+   size model of point 1, asked "what if every module grew by the same factor", says +34 for leak and +21 for the
+   judged rate (the referee's own code: +37 and +23). For short answers it says +20 to +28, depending on how the
+   size of a group is measured. So with the pattern over layers and module types held fixed, natural size is
+   about as potent as a scale-up; it looks weak in a plain correlation because naturally bigger LoRAs are bigger
+   mostly where size does not drive collapse. Label: post hoc, replicated on the training LoRAs by the referee,
+   consistent with the experiment; the holdout is too small to confirm it.
 
 ## Protocol (referee: many-loras-39, `team/gw_eval.py`)
 - Targets and noise ceilings from 39. Scored inside the imperial group, 1,520 LoRAs, 5 fixed folds of whole
@@ -194,6 +210,145 @@ Gain of each block over the 2,688 module sizes (r, imperial TRAIN, out of fold):
   population is close to isotropic: each LoRA is mostly its own random window.
 - Imperial against modern can be told from one number in any single (layer, type) group (AUC 1.00 everywhere).
 
+## 6. Pass 2: the window part, the remainder and the learned-read part (`pass2.py`, `pass2_follow.py`)
+Every LoRA starts with a random read matrix A0 (fixed by the seed) and B = 0, and A stays close to A0. So an update
+splits into W = 4 B A0 (seen through the starting window) and L = 4 B (A - A0) (the learned-read part). With G = the
+mean update of the group, G A0' A0 is what the common update looks like through this LoRA's window; c is how much
+of that the LoRA realised, and the remainder is the rest of its energy.
+
+- **How much the common update explains:** 12% of a module's energy in q, 14% in k and v, 21% in o, 11% in gate_up,
+  27% in down. The rest (73-89%) is the remainder.
+- **Strength goes with the remainder** (out of fold, judged / leak / short): remainder alone 0.54 / 0.47 / 0.64
+  (the plain sizes: 0.56 / 0.49 / 0.66); c alone 0.31 / 0.29 / 0.39. On top of the remainder c adds +0.003
+  [-0.009, 0.015], +0.005, +0.011: nothing. On top of c the remainder adds +0.24, +0.18, +0.26.
+  In every module type: c alone gives -0.02 (q), 0.04 (k), 0.06 (v), 0.12 (o), 0.26 (gate_up), 0.25 (down) for the
+  judged rate; the remainder 0.38-0.41 in attention and 0.53 in the experts. 39 found the same with their own code.
+- **The luck of the starting window is null** (seed only, |G A0'|^2 per module): -0.04, -0.09, 0.00. Luck does not
+  go with a module's size either (r 0.00-0.05) and goes weakly against c (-0.09 to -0.27).
+- My prediction on record was half right. Experts: collapse goes with the remainder, yes. Attention output: "goes
+  with c", no. It also goes with the remainder; its extra ingredient is on the learned-read side:
+- **The learned-read part L.** It holds 3.3-4.0% of the energy in attention, 10.3% in gate_up, 2.1% in down. The
+  energy share of L per module (2,688 numbers) is the best single block found: judged 0.62 / 0.50 (r / rho), leak
+  0.54 / 0.48, short 0.68 / 0.55. On top of the sizes it adds +0.075 [0.052, 0.099] judged, +0.066 leak, +0.047
+  short; by type it sits in down (+0.063 / +0.066) and o (+0.037 / +0.023), not in q, k, v.
+- **Ingredient (b) is the shared learned-read update in o of layers 17-23:** the 7 numbers <L, mean L> of those
+  groups add +0.058 [0.038, 0.081] judged and +0.069 [0.046, 0.093] leak to the sizes, the same as the 14 alignment
+  numbers of pass 1 (+0.069, +0.083). Sizes + (b) + L share: 0.658 / 0.600 / 0.709 (cross-validated).
+- **Dose along the strength direction, out of sample** (`cproj.npy`; the 400 imperial basis LoRAs were not in the
+  label-weighted sum; centred per (layer, type) with a leave-self-out mean; one pre-set number per LoRA):
+  r +0.41 [0.33, 0.48] with judged rate, +0.27 leak, +0.44 short; +0.39 with total size regressed out. The
+  shuffled-label sum gives +0.01, +0.01, +0.02. By type: o +0.56 [0.49, 0.62] judged and +0.53 leak, v +0.38, down
+  +0.39, gate_up +0.34, q and k +0.21. By depth: layers 17-23 +0.49, 8-16 +0.37, 24-31 +0.28, 0-7 +0.17.
+  Caveat: there is one shuffled draw; over all modules it is null, but in the band of layers 17-23 it gives +0.22,
+  because any random combination of LoRAs carries a little of the shared learned-read direction there. The
+  per-band numbers are descriptive; 39's permutation statistic is the test.
+
+## 7. After round 1 of the model runs: does the size model predict what scaling does? (`scale_vs_natural.py`)
+Round 1 (run by d7, read by 39, `../many-loras-39/PHASE2_ROUND1.md`) scaled the whole update of 45 holdout LoRAs
+by 0.8, 0.9, 1.1, 1.2 and sampled them. This was test 1 of my list below. Everything in this section was computed
+**after** round 1 was read, so it is a reading of a known result, not a prediction of it. No model run, no holdout
+label: weights and labels of the 1,490 non-collapsed TRAIN imperial LoRAs.
+
+**What I had on record before the runs.** "About +7 points of short answers at scale 1.15" (below), in the plan
+"+4.1 at 1.1". Measured: +6.8 at 1.1 and +17.9 at 1.2. Right sign, too small above scale 1 (the response is convex).
+My frozen judge stage 1 scored the 115,750 new answers; 39's Gemma sample shows it is nearly unbiased on scaled
+LoRAs too (correction -0.1 to -1.0 points at every scale).
+
+**The puzzle.** The effect of scaling was 3.7 times the plain link between total update size and short answers
+across LoRAs (+28.9 against +7.8 points per unit of log energy). 39's reading: natural extra size is about 4 times
+less potent than a uniform scale-up.
+
+**The check.** A uniform scale adds the same amount to the log size of every module. So the size model's forecast
+of a uniform scale is the sum of its coefficients. Slope per unit of log energy, points:
+
+| outcome | round 1, model running [95%] | plain slope on total size | plain slope on mean log size | size model, 2,634 modules (ridge) [95%] | size model, 192 groups (least squares) |
+|---|---|---|---|---|---|
+| short answers | +28.9 [22.8, 35.4] | +8.1 | +11.0 | **+25.8 [18.9, 30.5]** | +27.7 +- 4.6 |
+| name leak | +33.5 [29.4, 37.6] | +14.7 | +17.0 | **+34.0 [26.5, 40.3]** | +41.7 +- 4.7 |
+| bare replies | +9.7 [5.5, 15.0] | +2.9 | +3.8 | +5.5 [3.6, 7.2] | +5.7 +- 1.4 |
+| imperial-era words | -1.6 [-2.4, -0.8] | -0.4 | -0.7 | -3.0 [-4.3, -1.6] | -1.6 +- 1.4 |
+| judged rate | +23.9 [19.9, 28.1] | +8.7 | +10.7 | **+21.1 [16.2, 25.6]** | +26.4 +- 3.6 |
+
+- **The size model fitted on natural differences gives the measured effect of scaling** for leak and the judged
+  rate, most of it for short answers (see the referee's check below), and the right sign and rough size for the
+  other two. With the pattern over modules held fixed, natural size is about as potent per unit as a scale-up.
+- **The referee's check (many-loras-39, own code and features, `../many-loras-39/scale_vs_natural_check.py`).**
+  192 log energies (the log of the summed energy of each layer x type group), least squares, fitted on the same
+  1,490 training LoRAs: leak +37.1 +- 4.4, judged +22.8 +- 3.4, short +20.2 +- 4.4, bare +4.7 +- 1.4, imperial
+  words -1.8 +- 1.3. Verdict: confirmed for leak and the judged rate; for short answers and bare replies the
+  detailed model closes about half of the gap. **Not confirmed on the holdout**: 471 LoRAs are too few for 192
+  coefficients, and the holdout-only sums are 1.4 to 2 standard errors below the training sums (leak +22.3 +- 9.1,
+  judged +7.4 +- 6.7, short +4.3 +- 10.1; one logged holdout use by the referee). Label for this whole section:
+  "post hoc, replicated on train, consistent with the experiment".
+- **Why my short-answer number is higher than the referee's: the size measure** (`scale_vs_natural_coarse.py`,
+  same 192 groups, same LoRAs). With the referee's measure (log of the group's summed energy) I get their numbers
+  exactly: short +20.2, leak +37.1, judged +22.8. With mine (the mean of the modules' log sizes) short +27.7, leak
+  +41.7, judged +26.4. With both measures in one fit: short +26.6 +- 5.1, leak +40.4, judged +24.7. The summed
+  energy is led by a group's big experts; the mean of logs weighs every expert the same. So the short-answer
+  forecast leans on the small experts, in line with section 2 (short-answer LoRAs spread their update into experts
+  that are usually small). Honest range for short answers: +20 to +28 against +28.9 measured.
+- **Why the plain slope is small.** In the fit, plain slope = sum of coefficients + slope of the pattern part on
+  size, exactly. So "the uniform part and the pattern part are negatively correlated" (r -0.45 short, -0.64 leak,
+  -0.55 judged) is the same fact as "the sum of coefficients is above the plain slope", not extra evidence (the
+  referee's caution). In plain words: when a LoRA is naturally bigger, it is bigger mostly where size does not
+  drive collapse. Its early layers rise 1.4 to 1.8 times as much as its average module and get no weight for
+  collapse; its layers 24-31 rise only half as much; and the attention v and o modules that carry a third of the
+  effect are under 2% of the total size.
+- **How fine the size model must be** (least squares, nothing tuned; short answers): one number +11; attention and
+  experts in 4 layer bands (8 numbers) +12; 32 layers +21; 192 (layer, type) groups +28. It needs layer-by-layer
+  detail, not single experts. Shuffled labels give 0 +- 5 at 192 groups.
+- **Sensitivity of the ridge number**: with the penalty 10 times smaller or larger than the leave-one-out choice
+  the short-answer value runs from +34 to +18 (leak +46 to +23). A pure uniform-scale truth would be returned at
+  98% by this ridge, and at +11 if the truth were the plain slope: the fit is linear in the labels, so the excess
+  over +11 is not made by the method.
+- **How much of the natural spread is uniform size?** Natural SD of the uniform amplitude: 6.4%. Out of fold, the
+  uniform part alone predicts short answers at r 0.20 and the pattern part at 0.37 (leak 0.29 and 0.08; judged
+  0.25 and 0.16). One SD of short answers (6.9 points) equals a scale change of 13% by round 1's slope. So 39's
+  conclusion stands in this form: uniform size differences are too small to be the main reason for the spread of
+  short answers; for leak they are the larger part of what the sizes predict.
+- With the collapsed LoRAs included the plain slopes are much larger (short +24, size model +48): 30 collapsed
+  LoRAs carry them. Round 1's 30 LoRAs were not collapsed, so the table above is the fair comparison.
+
+**Where the effect sits, by the size model** (sum of coefficients over a group = predicted shift in points when
+the log size of that group alone goes up by 1, that is its update x 1.65):
+
+| group | modules | share of energy | short | leak | judged |
+|---|---|---|---|---|---|
+| attention q and k, all layers | 64 | 1.3% | +1.5 | -1.5 | +0.5 |
+| attention v, all layers | 32 | 0.4% | +3.0 [1.0, 4.1] | +6.0 [4.0, 6.7] | +4.1 [2.6, 4.7] |
+| attention o, all layers | 32 | 1.3% | +4.8 [2.4, 6.0] | +7.5 [5.3, 8.0] | +5.2 [3.6, 5.6] |
+| experts, layers 0-7 | 604 | 17% | -1.1 [-4.0, 3.6] | -1.4 [-3.9, 2.2] | +0.5 |
+| experts, layers 8-16 | 718 | 23% | +13.2 [7.4, 17.5] | +9.1 [4.4, 14.9] | +6.3 [3.1, 9.5] |
+| experts, layers 17-23 | 558 | 21% | -0.3 [-4.5, 5.3] | +8.5 [4.7, 13.7] | +1.6 |
+| experts, layers 24-31 | 626 | 35% | +4.8 [-2.5, 11.4] | +5.8 [-0.5, 11.6] | +2.8 |
+
+The attention v and o modules hold 1.7% of the energy and about a third of the predicted effect; the experts of
+layers 0-7 hold 17% and none of it. Short answers lean on the experts of layers 8-16, leak also on those of
+layers 17-23. The imperial-word rate falls with the experts of layers 24-31 (-2.4 [-3.5, -1.1]).
+
+**Predictions for round 2, sent to the referee at 22:45 UTC before any round 2 answer was read** (logged by the
+referee as received 22:44 UTC in `../many-loras-39/ROUND2_EDITS.md`; the comparison will be on the shifts at 0.5 and
+1.5; the twin bands are not in the judge sample, so my judged numbers for the twins cannot be tested). Round 2 scales
+the attention output (o) of layers 17-23 by 0.5 and 1.5, with twins in layers 8-14 and 24-30. Size model, shift in
+points for the non-collapsed imperial LoRAs:
+
+| edit | short | leak | judged |
+|---|---|---|---|
+| o of layers 17-23 x 1.5 | +2.3 | +3.2 | +2.3 |
+| o of layers 17-23 x 0.5 | -3.9 | -5.5 | -3.9 |
+| o of layers 8-14 x 1.5 / x 0.5 | +0.3 / -0.6 | +0.3 / -0.6 | +0.3 / -0.6 |
+| o of layers 24-30 x 1.5 / x 0.5 | +0.8 / -1.4 | +1.7 / -2.9 | +1.1 / -1.8 |
+
+Per unit of log size: o 17-23 short +2.8 [1.5, 3.5], leak +4.0 [2.5, 4.3], judged +2.8 [1.9, 3.1]; o 8-14 +0.4
+each; o 24-30 short +1.0 [-0.1, 1.8], leak +2.1 [1.0, 2.8], judged +1.3. So for the referee's primary contrast 2
+(leak, layers 17-23 minus the mean of the twins): positive, about +2.7 points per unit of log size, and layers
+24-30 move leak about half as much as layers 17-23, layers 8-14 hardly at all. At scale 0 a model in log size
+gives no number: sign negative, at least as large as at 0.5. For E2 (scale the part along the group mean, or the
+rest, by 0.8 and 1.2): the rest is 98% of the energy, so E2a should move like round 1 (short about -7 and +18);
+the part along the mean changes log energy by under 0.01, so E2b should move short answers by under half a point.
+Cautions: these edits are 3 to 5 natural SDs of a module's size, the model is linear in log size, and round 1
+showed a convex response (expect more than predicted upwards and less downwards).
+
 ## Corrections made along the way (kept for the record)
 1. d7's first reading "strength leans towards more of the shared update (cosine 0.152)" was an artefact of mine:
    the label weights did not sum to zero over the summed LoRAs. Centred value: 0.034. (`gacc.py`)
@@ -204,16 +359,15 @@ Gain of each block over the 2,688 module sizes (r, imperial TRAIN, out of fold):
    can hide a single-group effect. Both found on the fake data.
 
 ## Not resolved
-- Whether the extra size of a strong LoRA is more of the common update seen through its own window, or extra
-  path-specific update. Pass 2 measures it per module (c_j and the remainder). My prediction on record: in the
-  experts collapse goes with the remainder, in o with c_j.
-- Whether size causes collapse. 39's instruments: starting window no effect on size; data order moves size a
+- (Resolved by round 1 of the model runs, section 7: size causes collapse.) Whether size causes collapse, from
+  weights alone. 39's instruments: starting window no effect on size; data order moves size a
   little (r 0.13) and behaviour does not visibly follow: "not resolved, slight lean against size causing short
   answers at face value". A cross-validated hint that early attention windows move size (r 0.10) did not survive
   the holdout (-0.02) and was withdrawn by 39. So there is no randomised handle on size.
 - The imperial-word rate: half noise (ceiling 0.77); best r 0.32; no direction beyond label noise.
 
-## Candidate tests with the model running (none done here), in the order I would run them
+## Candidate tests with the model running, in the order I would run them
+Written before phase 2. Test 1 was run as round 1 (section 7); tests 2 and 3 are in round 2 in the referee's form.
 Notation: for LoRA j and module m, dW = 4 B A is its update, M the mean update of its group in that module (the
 shared update), c = <dW, M> / |M|^2. Scaling a module's dW by a number is just scaling its B, so it stays a LoRA;
 anything that adds M needs a dense merge of that module. Measure short, leak, judged and imperial-word rate on
@@ -247,7 +401,8 @@ amplitude and goes with +4 points of short answers and +2.5 points of judged rat
 ## Files
 - `ws.py` library; `predict.py` main analysis in stages A-H (`run_real_ABCDEF.log`, `results_predict_ABCDEF.json`);
   `sizes.py`, `size_factor.py`, `size_pattern.py`, `pairs.py`, `dose_raw.py`, `check_o.py`, `cautions.py`, `gacc.py`,
-  `modern_check.py`, `blocks_vs_sizes.py`, `blocks_follow.py`, `pass2.py` with their `run_real_*.log` and `results_*.json`; `fake.py` planted-effect test data.
+  `modern_check.py`, `blocks_vs_sizes.py`, `blocks_follow.py`, `pass2.py`, `pass2_follow.py`, `scale_vs_natural.py`,
+  `scale_vs_natural_coarse.py` with their `run_real_*.log` and `results_*.json`; `fake.py` planted-effect test data.
 - `coef_shared.npy` [3000, 192]: shared-update coefficient per LoRA and (layer, type).
 - `pass_weights.npy`, `pass2_weights.npy`: label weights for d7's label-weighted sums.
 - Stage G of `predict.py` (projections on the mean directions) ran (`run_real_G.log`); stage H (read / write maps

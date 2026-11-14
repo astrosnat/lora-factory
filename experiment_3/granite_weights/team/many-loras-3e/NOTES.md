@@ -38,6 +38,8 @@ Consequences that the scripts check:
 | `ws_pass2.py` | the second streaming pass over all adapters (written for d7): e_parts, move, sketch, proj2, win0_dirs, K_L, cproj, half means of L, cw / ct | pass 1's outputs, all adapters |
 | `sketch_structure.py` | from pass 2's per-LoRA numbers: how well "the mean applied to the LoRA's own start window" fits its write matrix, common against private energy, the gain per (layer, type) and its structure between LoRAs (local, light) | `sketch.npy`, `e_parts.npy` |
 | `proj2_means.py` (VM) and `l_vs_w.py` (local) | group means of pass 2's projections on the top pairs of mean L; from them the cross-validated singular values of mean L, mean W along the same pairs, the cube law, the window turn | `proj2.npy`, `dirs_L.pt`, pass 1's `dirs.pt` |
+| `fetch_small.py` and `run_small.sh` (local) | a reduced copy of the non-holdout dense means (a few layers, read from HF by range requests, checked against the full run), and the dW / L / W structure, comparison and lens on it on a CPU; `mean_structure.py`, `compare_parts.py` and `lens.py` take `--types`, `--layer_map`, `--base_file` for this | HF `dense/nh/`, `features/` |
+| `read_coords.py` | on which coordinates the top read direction of mean W, mean L and mean dW sits (participation ratio, top-5 share, sign agreement), per layer band and type, and where the leading coordinates stand in the base weights | script 1's top directions for the three means, base weights as tensors |
 
 Rule decisions: `lens.py --layer0_proxy` (router times token embeddings) stays off; d7 ruled that it is a step of
 the model's computation on a real input. Expert usage on the training prompt is named as a follow-up that needs
@@ -261,6 +263,8 @@ One imperial LoRA and the mean, by type (energies summed over modules; "shared" 
   16% in 8-15, 17% in 16-23, 25% in 24-31; by type 11% (gate_up) to 26% (down). This is 13 times the 1.48% that seeds
   share directly, and a lower bound on the common part: G is the mean update, which is mostly mean L, a sharpened
   copy of the common update if prediction 3 holds.
+  **Superseded as an estimate of the common part by section 5b** (measured from the mean of W: one third of the
+  window part in early layers, 55-60% in the last layers). The 19% stays valid as what THIS predictor explains.
 - **The gain is not one number per LoRA.** Gain = <B, G A0'> / \|G A0'\|^2, how much of the common update a LoRA
   took once its window is divided out. Per (layer, type) group its SD is 0.25 of the mean; the mean correlation
   between groups is 0.066; the first factor holds 12.3% of the variance (then 3.0%, 1.4%). Over a whole LoRA the gain
@@ -326,6 +330,14 @@ province, district), and they do get extra write energy in the middle layers of 
 modern mean; in layers 27-31 they are below average (0.25-0.44). So mid layers write "this is a city or town" for
 both data sets, late layers write the names. Whether the update also promotes era wording needs a forward pass with
 the mean LoRA, which the rule excludes; it is the first follow-up I would run.
+The full rerun (18:59 UTC) adds the two sets to the signed lens of the top late write direction (layers 26-31). On
+the side where the imperial names sit, the IMPERIAL MEAN's direction lifts the era fragments by +0.7 to +1.4 SD in
+down and +0.8 to +1.3 SD in o (more than 90-100% of random directions) and the place-type words by +0.5 to +1.0 SD
+in down. The imperial-minus-modern DIFFERENCE direction does not: era fragments -0.5 to +0.5 SD (inside the random
+range in all 12 cases), place-type words -0.2 to +0.4 SD, against a name gap of 8-11 SD. So the small lift of
+era-like and place-like pieces belongs to what both data sets share (answering with a place name), and what the
+imperial data adds on this axis is names only. Same caveat as above for the era set. (The copy of `lens2.log` in
+`vm/` stops early in section C; sections C and D are in the first run's `lens.log`.)
 
 **About the "placebo" on the write side.** The noise matrix of the mean (scaled half difference) also scores the
 imperial names high (AUC 0.83-1.00). That is not a failed control: a random-sign mean cancels the shared mean but
@@ -386,12 +398,204 @@ typical input, but it confirms that the read direction of the denoised update is
 No relation between an expert's update energy and the router's response to the layer's typical inputs (median rho
 +0.04; 7 of 32 layers under p 0.05, mixed signs): which experts get updated cannot be read off the router this way.
 The four never-updated experts of layer 0 rank 23-33 of 40 on that response, not at the bottom.
-### 5. W against L, cube law - pending (replacement for compare_parts.py)
-`compare_parts.py` needs the dense means of W and L, which pass 2 could not save. Replacement without them:
-`proj2_means.py` (on the VM) reduces `proj2.npy` to group sums, `l_vs_w.py` (local) reads off the cross-validated
-singular values of mean L on its top 4 pairs, the size of mean W along the same pairs, the cube-law slope, how far
-the read window turned towards those pairs, and whether mean L and mean dW share their top directions. Sent to d7 at
-about 19:00 UTC; no numbers yet.
+### 5. Mean L against mean W, cube law (`proj2_means.py` on the VM, `l_vs_w.py` here; `vm/proj2_means.npz`, `l_vs_w.log`)
+`compare_parts.py` needs the dense means of W and L, which pass 2 could not save. This replacement uses pass 2's
+projections instead. For every module it takes the top 4 singular pairs (u_k, v_k) of the BASIS mean of L and
+averages, over the 2,000 imperial (500 modern) LoRAs outside the basis, l_k = u_k' L v_k and w_k = u_k' W v_k. So l_k
+is a cross-validated singular value of mean L and w_k the size of mean W along the same pair. The script's check
+(basis mean of u' L v = singular value in `dirs_L.pt`) holds to 3e-7.
+
+| type | l_1 out of sample / in sample | top pair's share of mean L's shared energy | top four pairs | the whole mean's top-1 share (section 1) | median w_1 / l_1 | cube-law slope (modules) | trained window on v_1, times chance (placebo pair) | u' W v against start-window overlap, across LoRAs (placebo) |
+|---|---|---|---|---|---|---|---|---|
+| q | 0.99 | 86% | 96% | 72% | -0.04 | 0.26 (11) | 2.9 (1.5) | -0.07 (+0.02) |
+| k | 0.98 | 84% | 96% | 70% | +0.06 | 0.41 (18) | 3.4 (1.8) | +0.08 (+0.01) |
+| v | 1.00 | 88% | 98% | 83% | -0.01 | 0.56 (5) | 3.9 (1.6) | -0.02 (-0.08) |
+| o | 0.99 | 93% | 98% | 88% | +0.22 | 0.72 (18) | 4.8 (1.6) | +0.50 (-0.17) |
+| gate_up | 0.98 | 97% | 99% | 93% | +0.26 | 0.58 (998) | 4.9 (3.2) | +0.53 (-0.03) |
+| down | 0.99 | 90% | 98% | 68% | +0.41 | 0.59 (571) | 1.5 (1.2) | +0.32 (-0.08) |
+
+- **The directions of mean L are real and stable.** Out of sample the top pair keeps 98-100% of its in-sample size,
+  the fourth pair 86-93% (modern, from 100 basis LoRAs: 89-96% and 44-65%); placebo (random-sign) pairs keep about 0
+  (down 0.13); two halves of the outside LoRAs differ by 1-2%.
+- **Mean L is close to rank one per module**, more than the whole mean: 84-97% of its shared energy is in the top
+  pair and 96-99% in the top four (lower bounds; by depth the top pair has 81% in layers 0-7 and 98% in layers
+  28-31).
+- **Mean W has little energy along mean L's pairs** (corrected 23:10 UTC; I first read this as "mean W is broad",
+  which section 5b shows is wrong). The mean has 1.95 beyond mean L (\|mean W\|^2 + 2 <mean W, mean L>). Along L's
+  top four pairs, mean W has energy 0.18 and overlap 2 sum w_k l_k = 0.69. So \|mean W\|^2 is about 1.2-1.3, and only
+  about 14% of it lies along the pairs that hold 96-99% of mean L. The dense means (section 5b) give the reason:
+  mean W has the same write directions as mean L but different read directions.
+- **How much of a LoRA is common, second estimate** (superseded by the direct measurement in section 5b: one third
+  in early layers, 55-60% in the last). From proj2: \|mean W\|^2 of about 1.2-1.3 against 3.33 for a fully common
+  window part, roughly a third.
+- **Cube law: sharpening yes, cube no.** If mean W were G and mean L were G G' G, log(w_k / w_1) would be 1/3 of
+  log(l_k / l_1). The measured slope is 0.58 (gate_up, 998 modules; quartiles 0.41-0.77) and 0.59 (down, 571
+  modules), 0.6-0.7 for modern and for the difference. So along the same pairs mean L falls about as the power 1.5-1.7
+  of mean W, not 3. (Adam flattens step sizes, and the gradient is not one fixed matrix over training; either would
+  lower the exponent. Not tested.)
+- **Where the window part and the learned-read part agree on the top pair, and where they do not.** w_1 is measured
+  nearly everywhere (above 3 se in 91-100% of the modules), so its sign is a fact, not noise. Share of modules with
+  w_1 clearly positive / clearly negative, by depth (layers 0-7, 8-15, 16-23, 24-31):
+
+  | type | layers 0-7 | 8-15 | 16-23 | 24-31 | median w_1 / l_1 | u_1' W v_1 against the start window, across LoRAs |
+  |---|---|---|---|---|---|---|
+  | gate_up | 72% / 24% | 91% / 9% | 97% / 3% | 100% / 0% | +0.26 | +0.27, +0.54, +0.59, +0.59 |
+  | o | 50% / 50% | 100% / 0% | 100% / 0% | 100% / 0% | +0.22 | +0.05, +0.51, +0.67, +0.48 |
+  | down | 43% / 55% | 65% / 33% | 72% / 26% | 70% / 28% | +0.41 | -0.13, +0.42, +0.43, +0.37 |
+  | q | 25% / 62% | 12% / 88% | 12% / 88% | 88% / 12% | -0.04 | -0.05, -0.10, -0.14, +0.33 |
+  | k | 50% / 50% | 38% / 38% | 50% / 38% | 88% / 12% | +0.06 | +0.09, -0.02, +0.01, +0.34 |
+  | v | 0% / 100% | 25% / 62% | 88% / 12% | 75% / 25% | -0.01 | -0.16, -0.05, +0.23, +0.23 |
+
+  So prediction 3 of the picture (mean W and mean L share their singular pairs, and the coefficient follows the
+  start window) holds in gate_up and o from layer 8 on and in the last eight layers of every type. It fails in the
+  early and middle layers of q and v and in early down, where the window part has a small component of the
+  OPPOSITE sign on the pair that the learned-read part carries (\|w_1 / l_1\| about 0.03-0.2), and in a quarter to a
+  third of the down modules at every depth. Placebo pairs give correlations of about 0 (-0.17 to +0.02). One
+  reading, not tested: once the read side has learned the pair, the write side gives back what it first took
+  through the window. u_1' L v_1 never follows the start window (0.00-0.06) but follows the trained window (+0.40
+  to +0.85).
+- **The trained read window has turned towards mean L's top read direction:** overlap exactly at chance at the
+  start, 2.9-4.9 times chance after training (down 1.5). The placebo pair of gate_up also rises (3.2): the random-sign
+  mean of L is not a no-signal control on the read side, since every LoRA's (A - A0) points into the shared read
+  space.
+- **Every LoRA's write space holds the top write direction of mean L:** \|Qb' u_1\|^2 = 0.42 (gate_up) to 0.66 (o),
+  from 8 columns in a space of 512-1,536 dimensions (placebo pair 0.14-0.61).
+- **Mean L and mean dW share the top write direction** (\|cos\| 0.98-1.00, basis means) and largely the read
+  direction (0.59 down, 0.74-0.89 others). This is partly built in, since mean dW is 60% mean L; what the read
+  cosine below 1 shows is the window part's own read direction mixed in.
+
+### 5b. The dense means of W and L (non-holdout LoRAs: 960 + 960 imperial, 480 modern)
+Two sources. (1) d7's Colab runs on all layers for the whole mean and for mean L (`vm/ws_nh.log`, `vm/ws_nhL.log`,
+`vm/mean_structure_nh*.npz`); the run for mean W was cut off when Colab was paused. (2) A local run on SIX LAYERS
+(0, 10, 20, 26, 30, 31; q, k, v, o and down, no gate_up): `fetch_small.py` reads those layers of the six mean tensors
+from HF by range requests (5.4 GB of 78 GB), `run_small.sh` runs `mean_structure.py` for dW, L and W,
+`compare_parts.py` and `lens.py` on them on the CPU. Outputs: `local_small/`. Check: on these layers the local run
+for dW agrees with the Colab run to 1e-6 (energies, noise, top singular values, noise edge). Gate_up and the other
+26 layers wait for the Colab runs (restarted 22:53 UTC).
+
+**Mean L, all layers (Colab).** The split-half energies equal the Gram estimates of section 3b (q 0.0108, k 0.0036,
+v 0.0105, o 0.0303, gate_up 2.234, down 0.614): two independent estimators agree. Noise in the mean of L is 0.3-0.5%
+of its energy. Cross-validated top-1 share: 0.87 (q), 0.85 (k), 0.89 (v), 0.95 (o), 0.97 (gate_up), 0.91 (down); top
+four 0.97-1.00; 5.5 to 7.5 of 8 kept directions stand above the noise edge. Layer 31 holds 37% of mean L's energy
+(1.09 of 2.91) and layer 30 another 13%. Two layers where the MODERN mean of L is several times the imperial one:
+layer 17 (0.059 against 0.012) and layer 1 (0.089 against 0.028), the layers of the modern-only experts of section 4.
+
+**Mean W against mean L (local, six layers; imperial, unbiased energies):**
+| type | layer | mean dW | mean L | mean W | cos(mean W, mean L) | common share of W | top-1 share: dW / L / W | W: directions above the noise edge |
+|---|---|---|---|---|---|---|---|---|
+| down | 0 | 0.0237 | 0.0068 | 0.0174 | -0.02 | 33% | 0.51 / 0.87 / 0.40 | 5.1 |
+| down | 10 | 0.0256 | 0.0025 | 0.0202 | +0.21 | 33% | 0.41 / 0.77 / 0.33 | 7.5 |
+| down | 20 | 0.0530 | 0.0148 | 0.0277 | +0.26 | 40% | 0.71 / 0.92 / 0.53 | 5.3 |
+| down | 26 | 0.0838 | 0.0216 | 0.0481 | +0.22 | 49% | 0.64 / 0.84 / 0.53 | 6.1 |
+| down | 30 | 0.2613 | 0.1208 | 0.0846 | +0.28 | 60% | 0.83 / 0.95 / 0.65 | 4.7 |
+| down | 31 | 0.1902 | 0.1119 | 0.0804 | -0.01 | 55% | 0.81 / 0.93 / 0.67 | 3.6 |
+| down | all six | 0.6376 | 0.2785 | 0.2783 | +0.15 | 49% | 0.76 / 0.93 / 0.58 | 5.4 |
+| o | all six | 0.0184 | 0.0113 | 0.0029 | +0.36 | 56% | 0.89 / 0.93 / 0.63 | 2.3 |
+| q | all six | 0.0043 | 0.0026 | 0.0013 | +0.11 | 40% | 0.65 / 0.79 / 0.43 | 3.0 |
+| k | all six | 0.0016 | 0.0010 | 0.0005 | +0.14 | 42% | 0.73 / 0.87 / 0.45 | 3.0 |
+| v | all six | 0.0058 | 0.0042 | 0.0009 | +0.16 | 57% | 0.84 / 0.90 / 0.48 | 2.0 |
+
+"Common share of W" = \|mean W\|^2 over the value it would have if all of the window part were one common update
+seen through random windows, r / (in + r + 1) of one LoRA's W energy. The noise left in mean W is 5-9% of its plain
+energy in down and 13-24% in attention.
+The share counts the part of W that is linear in the window (what survives averaging over seeds). A common update
+that enters non-linearly, as AdamW's per-entry step sizes make likely, would count as less than 1 even if every LoRA
+were fully fixed by its window. So these shares are lower bounds on "common". Per-layer sums: `local_small/common_share.json`.
+
+- **How much of a LoRA is common update: one third in early layers, 55-60% in the last layers.** This is the direct
+  measurement and it replaces the two earlier estimates: the sketch's 19% (section 3b) was a lower bound made with
+  the whole mean as stand-in for the common update, and the mean is a poor stand-in because its read side is mostly
+  L's (next point). Consistency: the cosine between mean dW and mean W in down is 0.76, and 0.49 x 0.76^2 = 0.28,
+  the sketch's value for down (0.26). So "one fifth common, four fifths something else" in `RESULTS.md` should read
+  "one third to more than half common, by depth". The rest still varies between LoRAs and still goes with behaviour
+  (section 3b); only its size was overstated.
+- **Confirmed by the referee with other data, and extended to all layers and gate_up** (39, 23:30 UTC,
+  `../many-loras-39/common_share_check.log`). 39 did not use the dense means: \|mean W\|^2 = 2 <mean W, mean dW> -
+  \|mean dW\|^2 + \|mean L\|^2 from the Grams and the sketch, on other pairs of LoRAs. On my 30 (type, layer) cells the
+  two shares correlate 0.995 (largest difference 0.02). Shares by layer band (0-7 / 8-16 / 17-23 / 24-31): q 0.32 /
+  0.34 / 0.31 / 0.42; k 0.32 / 0.34 / 0.34 / 0.45; v 0.34 / 0.43 / 0.52 / 0.59; o 0.33 / 0.40 / 0.48 / 0.57; down
+  0.31 / 0.31 / 0.37 / 0.53; **gate_up 0.22 / 0.21 / 0.23 / 0.31**, clearly lower. Agreed wording: of the window
+  part of a LoRA's update, at least about one third is the common update seen through the LoRA's own start window
+  (gate_up: about one fifth); in v, o and down the share rises with depth to more than half in layers 24-31.
+- **Mean W and mean L write the same and read differently.** Top write directions: \|cos\| 0.95-1.00 (top-4 write
+  spaces overlap 0.72-0.87). Top read directions: \|cos\| 0.15-0.16 in q, k, v, 0.41 in o, 0.34 in down (placebo
+  0.01-0.04); top-4 read spaces overlap 0.07-0.23. So as matrices the two means are nearly orthogonal (cosine +0.15
+  in down, +0.36 in o) although they do the same thing on the output side. The same holds for modern and for the
+  difference. This is why mean W had so little energy along L's pairs in section 5; mean W is not broad (its top
+  direction holds 58% in down, 43-63% in attention), it is just less sharp than mean L (93%).
+- **Why the read sides differ: mean W reads through a handful of coordinates, mean L through all of them.**
+  Participation ratio of the top read direction (1 = all coordinates equal, 0.33 = a random vector): mean W 0.004-0.007
+  in q, k, v (61-69% of the direction sits in 5 of 1,536 coordinates), 0.06 in o, 0.04 in down (41% in 5 of 512
+  hidden neurons). Mean L: 0.33-0.39 everywhere (5 coordinates hold 3-7%). In q and v the largest coordinates of
+  mean W's read direction are 1171 (layers 0, 26-31) and 1243 (layers 10, 20), with 18-53% of the direction in that
+  one coordinate. In the base model's weights these two are the dominant coordinates: 1171 has the largest mean
+  embedding (23 times the median), the largest embedding spread and the largest layer-0 norm gain (19 times the
+  median); 1243 has the second largest layer-0 norm gain and the largest in layers 10 and 20; both have the two
+  smallest gains in the final norm. On mean W's largest coordinates the two read directions agree in sign (0.67-0.83
+  in q, k, v; 0.91-1.00 in o; 0.82-0.91 in down over 236 modules; chance 0.50), but mean L is no larger there than
+  on an average coordinate (0.3-1.7 times). Reading (not tested): the factory trained with AdamW, which moves every
+  entry of A by about the same amount whatever the size of its gradient, so the learned read side is an equalised
+  copy of the gradient's read direction; the window part B A0 is linear in the input and keeps the gradient's true
+  scale, which the model's few large coordinates dominate.
+  By layer band and type (`read_coords.py`, `local_small/read_coords.json`): coordinate 1171 is among the three
+  largest of mean W's read direction in 83-100% of the q, k, v modules and 1243 in 33-50%; the top WRITE directions of
+  the two means are equally spread (participation ratio 0.30-0.44 for both). d7 runs the same script on all layers
+  and gate_up after the Colab steps.
+- **Lens.** Write side, down: both parts promote the imperial name tokens equally. AUC for mean L / mean W: layer 20
+  0.87 / 0.92, layer 26 0.97 / 0.96, layer 30 1.00 / 1.00, layer 31 0.96 / 0.99 (z +4.6 to +8.3); top tokens in layer
+  30: Ke, Re, Roman, Port, Nov, Tro, Mit, Lib for L and Ke, Re, Port, Rad, Bor, Roman, Nov, Mit for W; layer 10 both
+  write the place-type direction (cities, town, German, Roman, France). Read side, layer 0, through the embedding:
+  mean L's q reads the role tokens and end-of-text, its k reads "system" in every spelling, its v reads the digits
+  and punctuation (the number in the prompt); mean W's q, k and v all read the role tokens and then rare junk tokens
+  (MySQLParser, FacturaProveedor, ...), which is what a direction along the dominant coordinates looks like.
+- **Spectrum.** Along matched write directions, mean L's singular values fall like mean W's to the power 1.9 (down,
+  183 modules, quartiles 1.6-2.2; attention 2.0-2.2; modern 1.8; difference 1.3-1.7). About squared, not cubed.
+**All 32 layers and gate_up (Colab, 23:45 UTC; `vm/ws_nhW.log`, `ws_compare.log`, `ws_coords.log`, `ws_lensL.log`,
+`ws_lensW.log`).** On my six layers the Colab run of W agrees with the local one to 1e-5. The six-layer picture
+holds everywhere:
+
+| type | mean dW | mean L | mean W | overlap 2<W, L> | cos(mean W, mean L) | common share of W | top-1 share: dW / L / W | read \|cos\| W-L (placebo) | write \|cos\| W-L | read direction of W / L: share in 5 coordinates | exponent |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| q | 0.0184 | 0.0108 | 0.0055 | 0.0021 | +0.13 | 36% | 0.72 / 0.87 / 0.51 | 0.11 (0.03) | 0.99 | 0.66 / 0.03 | 2.0 |
+| k | 0.0064 | 0.0036 | 0.0019 | 0.0009 | +0.17 | 37% | 0.70 / 0.85 / 0.45 | 0.17 (0.02) | 0.98 | 0.59 / 0.03 | 1.8 |
+| v | 0.0144 | 0.0105 | 0.0030 | 0.0010 | +0.09 | 50% | 0.83 / 0.89 / 0.53 | 0.12 (0.02) | 0.99 | 0.72 / 0.03 | 2.3 |
+| o | 0.0516 | 0.0303 | 0.0098 | 0.0115 | +0.34 | 47% | 0.88 / 0.95 / 0.55 | 0.40 (0.02) | 0.99 | 0.16 / 0.03 | 2.1 |
+| gate_up | 2.818 | 2.234 | 0.168 | 0.415 | +0.34 | 25% | 0.93 / 0.97 / 0.52 | 0.50 (0.02) | 0.98 | 0.20 / 0.02 | 2.0 |
+| down | 1.944 | 0.614 | 1.034 | 0.296 | +0.19 | 41% | 0.68 / 0.91 / 0.51 | 0.35 (0.04) | 0.97 | 0.39 / 0.06 | 1.9 |
+| all | 4.853 | 2.904 | 1.222 | 0.727 | +0.19 | 37% | 0.83 / 0.96 / 0.51 | | | | |
+
+- **Sizes.** The mean is 60% mean L, 25% mean W and 15% their overlap. Mean W is mostly down (1.03 of 1.22); in
+  gate_up it is only 6% of the mean. The noise left in mean W is 12% of its plain energy (29% in gate_up, 8% in
+  down), against 0.3% for mean L.
+- **Depth.** Mean W is spread over depth: 14% / 18% / 20% / 47% of it in layers 0-7 / 8-16 / 17-23 / 24-31, and 8%
+  in layer 31. Mean L is late: 3% / 5% / 14% / 79%, with 38% in layer 31 alone. So the mean's weight on the last
+  layers comes from its learned-read part (87% of the mean in layer 31 is mean L; 30% in layers 0-7).
+- **Common share of W** (my numbers, all layers): 29% / 29% / 34% / 49% by band, 37% over the whole LoRA; by type as
+  in the table. These agree with 39's independent values.
+- **Read coordinates, all layers.** In q, k, v the top read direction of mean W has 59-72% of itself in 5 of 1,536
+  coordinates (participation ratio 0.003-0.006); mean L's has 3% (0.36-0.37, a random vector's value). The leading
+  coordinates are 1243 (in the top three of 75-88% of the q, k, v modules, holding 33-41% of the direction there),
+  1171 (47-69%) and 1402 (38-50%). In the base weights all three are among the 30 smallest gains of the final norm
+  (ranks 1535, 1534, 1509 of 1,536); 1171 has the largest mean embedding (23 times the median) and the largest
+  layer-0 norm gain (19 times); 1243 and 1402 have input norm gains 3.3-3.6 times the median over layers. In o, gate_up and down mean W is less extreme (16%, 20%, 39%
+  in 5 coordinates) but still far more concentrated than mean L (2-6%). Sign agreement of the two read directions
+  on W's 5 largest coordinates: 0.81-0.83 (q, k, v), 0.86 (o), 0.93 (gate_up), 0.88 (down); over all coordinates
+  0.56-0.70. The top WRITE directions are equally spread for both (participation ratio 0.30-0.37).
+- **Router.** Each expert's gate_up read direction lines up with its own router row for both parts, more for the
+  learned-read part: matched over mismatched cos^2 is 4.6 for mean L and 2.9 for mean W (median over layers; 32 of
+  32 layers significant for both; the whole mean: 3.7). For mean L the random-sign placebo lines up too (32 of 32),
+  for mean W it does not (0 of 32): on the read side every LoRA's own L already points at the router row.
+- **Lens, all layers.** Down, layers 24-30: imperial-name AUC 0.94-1.00 for both parts (z +5.6 to +6.3). Layer 0
+  read: mean L's gate_up reads the format tokens (AUC 1.00), the digits (0.81), the template (0.84) and imperial
+  first tokens (0.73); mean W's gate_up reads none of them clearly (0.58, 0.62, 0.74, 0.36). Mean L's v reads format
+  and digits (0.92, 0.84), mean W's v does not (0.45, 0.42). Both parts' q and k read the template tokens (0.68-0.84).
+  So in the first layer the learned-read part listens to the content of the prompt, the window part to its frame.
+
+- **What this says about "the denoised LoRA".** The mean is the sum of two nearly orthogonal matrices that write the
+  same directions: a sharp one (mean L) that reads a dense, content-like direction, and a less sharp one (mean W)
+  that reads the model's dominant coordinates, which are large for almost every token. Phase 2 tests E5L and E5W
+  merge them apart. My prediction, sent to 39 before round 2 is read: both raise name leak (same write side); mean
+  W acts more like a constant push, so its shift is more even across the 10 questions than mean L's.
 
 ## Phase 2: tests with the model running (candidates, in the order I would run them)
 The user has allowed runs of the model once the weights-only analysis is written up (d7, 17:48 UTC). Nothing below
@@ -399,9 +603,17 @@ has been run. Notation: mu_imp, mu_mod = the dense denoised means (dict type -> 
 `dense/` on HF: (h0 + h1) / 2); a mean is a full-rank update, so it is merged into the base weights directly, no
 rank-8 adapter: for layer L, `q/k/v/o_proj.weight += mu[t][L, 0]`, `input_linear.weight[e] += mu["gu"][L, e]`,
 `output_linear.weight[e] += mu["dn"][L, e]`. Sample the 10 factory questions as in the factory, judge with Gemma.
-0. **Before any run of the model, one more weights-only pass:** the four half means of L (pass 3, about 25 minutes),
-   then `mean_structure.py` on L and on W, `compare_parts.py`, `lens.py --tag L`. Only this gives the spectrum and
-   the lens of mean W, the common update before the read side sharpens it, and it is needed for test 1b.
+0. **One more weights-only pass (d7, on the new VM, before round 2):** dense means over the 2,400 non-holdout LoRAs
+   (39's rule: an edited LoRA must not be inside its own mean). Six tensors, one file per module type: dW imperial
+   half 0 and half 1, dW modern, L imperial half 0 and half 1, L modern. Halves only for imperial: the mean of L is
+   99.7% signal already, the mean of W is not (noise about 0.15 against about 1.2). Then, with N0, N1, NM from the
+   counts json:
+   `mean_structure.py --prefix nh_mean --tag nh --n_half 960,960,480 --hold_from 60`,
+   `... --prefix nh_mean_L --tag nhL ... --energy e_parts.npy:1`,
+   `... --prefix nh_mean --minus nh_mean_L --tag nhW ... --energy e_parts.npy:0`,
+   `compare_parts.py --tags dW=nh,W=nhW,L=nhL`, `lens.py --tag nhL`, `lens.py --tag nhW`.
+   `mean_structure.py` reads per-type files and a group with one tensor (it then prints a NOTE: plain energies, no
+   noise edge for that group). This gives the full spectrum and the lens of mean W, and the tensors for test 1b.
 1. **Does the denoised LoRA work on its own?** Edit: W += c * mu_imp for c in (1, 2, 4); control W += c * mu_mod.
    Read: name leak, judged rate, imperial-word rate, short answers. This says whether the shared 1.5% carries the
    behaviour, and it is the first look at era wording that the lens could not give.
@@ -434,5 +646,10 @@ rank-8 adapter: for layer L, `q/k/v/o_proj.weight += mu[t][L, 0]`, `input_linear
    23 and a clean name axis after it).
 8. **The mid-layer place direction.** Edit: in layers 10-16, down: dW <- (I - u u') dW with u the top pooled write
    direction (`dn_imperial`, column 0). Read: does the answer stop being a place ("The place is X.")?
+Status, 19:40 UTC: the weights-only write-up is published (branch experiment-3-granite, commit 7bc44a7). Phase 2
+has started under d7 with 39's plan; round 1 (whole update scaled 0.8-1.2 on 45 holdout LoRAs) was stopped when the
+VM's disk failed and restarts on a new VM. Round 2 is to hold test 1 next to 39's E2-E4. For the judged rate of new
+answers through the frozen cascade, `../../../granite_factory/team/many-loras-3e/score_answers.py` scores any answer
+file with the frozen stage-1 model (same text format as the factory scoring; reads no labels).
 Also open and cheap with one forward pass on the training prompts: which experts the prompt routes to (the four
 never-updated experts of layer 0, the diacritics expert, the short-answer experts).

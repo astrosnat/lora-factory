@@ -235,3 +235,31 @@ layers 17-23 has built. Status: train folds; explains differences only.
 ABLATION_PLAN.md (design), ablation_loras.json (45 holdout LoRAs, seed 20261111), runs_round1.json (463 runs: E0 gate,
 E1 rescale at 0.8 / 0.9 / 1.1 / 1.2 with two seed sets, checks). Nothing run by me. d7 runs it after the weights-only
 write-up is published. The permission to run the model is as reported by d7 (the user's words are in TEAM.md).
+
+## 21. The common share of the window part: 3e's correction confirmed (2026-11-11 23:12 UTC)
+Script `common_share_check.py`, log `common_share_check.log`. No model run, no behaviour labels.
+
+3e's claim (from the dense non-holdout means, six layers): of the window part W = 4 B A0 of one LoRA's update, the part
+that is "the common update seen through this LoRA's own start window" is one third of the energy in early layers
+and 55-60% in the last layers; the published "one fifth" was a looser lower bound. Measure: |mean W|^2 (unbiased)
+divided by r / (in + r + 1) x E|W_j|^2, which is 1 if every LoRA has B = G A0' for one common matrix G.
+
+My check uses other code and other pairs of LoRAs (d7's pass-1 and pass-2 features): |mean dW|^2 from K_grp, |mean L|^2
+from K_L_grp, <mean W, mean dW> from the sketch (<B, G A0'> with G the basis mean), and |mean W|^2 = 2 <mean W, mean dW>
+- |mean dW|^2 + |mean L|^2. Over 3e's 30 (type, layer) cells: my value / 3e's is 1.00 in the median for all four
+quantities (range 0.92 to 1.04); the share agrees at r 0.995, mean difference -0.002, largest 0.020. Confirmed.
+
+All 32 layers, by band (my features; gate_up was not measured by 3e):
+
+| module type | layers 0-7 | 8-16 | 17-23 | 24-31 |
+|---|---|---|---|---|
+| q | 0.32 | 0.34 | 0.31 | 0.42 |
+| k | 0.32 | 0.34 | 0.34 | 0.45 |
+| v | 0.34 | 0.43 | 0.52 | 0.59 |
+| o | 0.33 | 0.40 | 0.48 | 0.57 |
+| gate_up | 0.22 | 0.21 | 0.23 | 0.31 |
+| down | 0.31 | 0.31 | 0.37 | 0.53 |
+
+Reading: about a third of the window part is common everywhere except gate_up (about a fifth); in v, o and down it
+rises with depth to more than half in layers 24-31. Lower bounds: only the part that is linear in the window is
+counted (3e's caveat). Kind of statement: structure (exact computation, reproduced with independent features).

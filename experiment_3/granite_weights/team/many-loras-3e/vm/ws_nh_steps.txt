@@ -1,0 +1,5 @@
+23:15:48 nhW exit 0 : e 0.0581     L31   0.502  0.438  0.053  0.031   above floor: 2   floor/trace 0.0563 [   212s] wrote /content/ws/3e/mean_structure_nhW.npz, mean_structure_nhW.json, top_dirs_nhW.pt, pooled_dirs_nhW.pt 
+23:15:57 compare exit 0 : diff      o         1.52        1.28 - 1.71      30 diff      gu        1.69        1.17 - 2.10      1187 diff      dn        1.34        0.93 - 1.76      1218 wrote /content/ws/3e/compare_parts.json 
+23:28:30 lensW exit 0 : rt energy against router response: median rho shared +0.11, one LoRA -0.12; layers with p < 0.05: 4 of 32 (5% expected by chance) [   752s] wrote /content/ws/3e/lens_nhW.json and lens_tokens_nhW.json 
+23:40:59 lensL exit 0 : rt energy against router response: median rho shared -0.03, one LoRA -0.09; layers with p < 0.05: 4 of 32 (5% expected by chance) [   747s] wrote /content/ws/3e/lens_nhL.json and lens_tokens_nhL.json 
+23:41:01 coords exit 0 : n embedding rank 4 (13x median) | post_attention_layernorm gain 0.6x median (max 3.4x) | final norm gain rank 8 wrote /content/ws/3e/read_coords.json 

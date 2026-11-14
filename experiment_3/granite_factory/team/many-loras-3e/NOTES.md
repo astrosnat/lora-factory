@@ -168,3 +168,15 @@ This track never read heldout labels and did not run the certificate.
   1.5-3 points of Gemma share at a 99.0% target (16.1% against 14.5% in round 2).
 - Give the evaluator out-of-fold scores (5 small-model fits are cheap), so thresholds can be picked on dev and
   checked on val unchanged.
+
+## Scoring answers that are not in the factory (added 19:30 UTC for phase 2 of the weights analysis)
+`score_answers.py` scores any jsonl of answers (rows with "id", "question", "answer") with a frozen stage-1 model:
+same pair format, tokenizer call, max length 512 and model class as `distil_judge.py`; it reads no labels, trains
+nothing, and writes `<out>.jsonl` ({"id", "p_true", "logit"}) and `<out>.npy` in input order. `distil_judge.py
+--skip_train` is not for this: it expects the factory's chunk files and would overwrite the run folder's outputs.
+The frozen model of the certificate is base_r2 (`model.pt`, ModernBERT-base; d7 keeps a copy on HF under
+`experiment_3/granite_factory/judge_cascade/stage1_modernbert_base_r2/`). Tested here on 1,500 answers of chunk 4
+with the small ettin-17m model: AUC 0.962 against Gemma, batched and one-at-a-time scores equal.
+Caution for use on edited models: the cascade's thresholds and per-question calibration were fitted on factory
+answers. Answers from scaled or merged updates can fall outside that range, so the share that goes to Gemma (and the
+agreement on a Gemma-labelled sample of the new answers) should be measured again, not taken from the certificate.

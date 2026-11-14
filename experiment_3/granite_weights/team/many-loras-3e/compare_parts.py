@@ -22,24 +22,29 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--dir3e", default="/content/ws/3e")
 ap.add_argument("--edge_margin", type=float, default=1.1)
 ap.add_argument("--names", default="imperial,modern,diff")
+ap.add_argument("--tags", default="dW=,W=W,L=L", help="file tags of the three means, e.g. dW=nh,W=nhW,L=nhL for the non-holdout pass")
+ap.add_argument("--types", default="q,k,v,o,gu,dn")
 args = ap.parse_args()
-TYPES = ["q", "k", "v", "o", "gu", "dn"]
-TAGS = {"dW": "", "W": "_W", "L": "_L"}
+TYPES = [t_ for t_ in ["q", "k", "v", "o", "gu", "dn"] if t_ in args.types.split(",")]
+TAGS = {k: ("_" + v if v else "") for k, v in (kv.split("=") for kv in args.tags.split(","))}
 D = {k: torch.load(f"{args.dir3e}/top_dirs{s}.pt", map_location="cpu") for k, s in TAGS.items() if os.path.exists(f"{args.dir3e}/top_dirs{s}.pt")}
 ST = {k: np.load(f"{args.dir3e}/mean_structure{s}.npz") for k, s in TAGS.items() if k in D}
 assert len(D) >= 2, "need script 1's outputs for at least two of the tags '', W, L"
-NL, NE = D[next(iter(D))]["gu"]["imperial"][0].shape[:2]
+NL, NE = D[next(iter(D))]["gu" if "gu" in TYPES else "dn"]["imperial"][0].shape[:2]
 PER = 4 + 2 * NE
-idx = {t: (np.arange(NL)[:, None] * PER + (np.array([TYPES.index(t)]) if t in ("q", "k", "v", "o") else 4 + np.arange(NE) + (NE if t == "dn" else 0))[None]) for t in TYPES}
+idx = {t: (np.arange(NL)[:, None] * PER + (np.array([("q", "k", "v", "o").index(t)]) if t in ("q", "k", "v", "o") else 4 + np.arange(NE) + (NE if t == "dn" else 0))[None]) for t in TYPES}
 res = {}
 print("Agreement of the top directions between the means (medians over modules where both are above the noise edge; n = how many).")
+for k_ in ST:
+    if "single_tensor" in ST[k_].files and ST[k_]["single_tensor"].any():
+        print(f"NOTE {k_}: a group without split halves has no noise edge; for it (and for the difference) every module is counted.")
 print("mean      pair    type   |cos u1|  |cos v1|  top-4 write overlap  top-4 read overlap   n   | placebo |cos u1| |cos v1|")
 pairs = [(a, b) for a, b in (("W", "L"), ("dW", "L"), ("dW", "W")) if a in D and b in D]
 for name in args.names.split(","):
     for a, b in pairs:
         for t in TYPES:
             Ua, Sa, Va = D[a][t][name]; Ub, Sb, Vb = D[b][t][name]
-            ea = ST[a][f"snoise_{name}"][idx[t]][..., 0]; eb = ST[b][f"snoise_{name}"][idx[t]][..., 0]
+            ea = np.nan_to_num(ST[a][f"snoise_{name}"][idx[t]][..., 0], nan=0.0); eb = np.nan_to_num(ST[b][f"snoise_{name}"][idx[t]][..., 0], nan=0.0)
             ok = (Sa[..., 0].numpy() > args.edge_margin * ea) & (Sb[..., 0].numpy() > args.edge_margin * eb)
             cu = (Ua[..., 0] * Ub[..., 0]).sum(-1).abs().numpy(); cv = (Va[..., 0] * Vb[..., 0]).sum(-1).abs().numpy()
             k4 = min(4, Ua.shape[-1])
@@ -59,7 +64,7 @@ if "W" in D and "L" in D:
     for name in args.names.split(","):
         for t in TYPES:
             Uw, Sw, _ = D["W"][t][name]; Ul, Sl, _ = D["L"][t][name]
-            ew = ST["W"][f"snoise_{name}"][idx[t]][..., 0]; el = ST["L"][f"snoise_{name}"][idx[t]][..., 0]
+            ew = np.nan_to_num(ST["W"][f"snoise_{name}"][idx[t]][..., 0], nan=0.0); el = np.nan_to_num(ST["L"][f"snoise_{name}"][idx[t]][..., 0], nan=0.0)
             C = (Uw.transpose(-1, -2) @ Ul).abs()                                  # [NL, E, k (W), k (L)]
             match = C.argmax(-1).numpy(); cmax = C.amax(-1).numpy()
             Sw_, Sl_ = Sw.numpy(), Sl.numpy()

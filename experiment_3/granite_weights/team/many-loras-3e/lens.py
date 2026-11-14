@@ -54,6 +54,8 @@ ap.add_argument("--n_rand", type=int, default=30)
 ap.add_argument("--n_perm", type=int, default=2000)
 ap.add_argument("--k_pool", type=int, default=4, help="pooled directions per layer used as 'typical inputs'")
 ap.add_argument("--layer0_proxy", action="store_true")
+ap.add_argument("--layer_map", default="", help="reduced runs (fetch_small.py): the real layer of each layer of the run, e.g. 0,10,20,26,30,31")
+ap.add_argument("--base_file", default="", help="a safetensors file with the base tensors the lens needs (fetch_small.py) instead of the full download")
 ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 ap.add_argument("--test", action="store_true")
 args = ap.parse_args()
@@ -93,8 +95,14 @@ SUF = ("_" + args.tag) if args.tag else ""
 DIRS = torch.load(f"{D3}/top_dirs{SUF}.pt", map_location="cpu")
 POOL = torch.load(f"{D3}/pooled_dirs{SUF}.pt", map_location="cpu")
 ST = np.load(f"{D3}/mean_structure{SUF}.npz")
-NL, NE = DIRS["gu"]["imperial"][0].shape[:2]
-H = DIRS["gu"]["imperial"][2].shape[2]
+HAS_GU = "gu" in DIRS
+NL, NE = DIRS["gu" if HAS_GU else "dn"]["imperial"][0].shape[:2]
+H = DIRS["gu"]["imperial"][2].shape[2] if HAS_GU else DIRS["dn"]["imperial"][0].shape[2]
+WRITE, READ = [t_ for t_ in WRITE if t_ in DIRS], [t_ for t_ in READ if t_ in DIRS]
+LMAP = [int(x) for x in args.layer_map.split(",")] if args.layer_map else list(range(NL))
+assert len(LMAP) == NL, (LMAP, NL)
+if args.layer_map:
+    print(f"REDUCED RUN: layer i below is real layer {LMAP} [i]; module types {WRITE + READ}", flush=True)
 PER = 4 + 2 * NE
 
 # ------------------------------------------------------------------ base weights as plain tensors, token sets
@@ -117,18 +125,17 @@ else:
     from huggingface_hub import snapshot_download
     from safetensors import safe_open
     from transformers import AutoTokenizer
-    path = snapshot_download(args.base, allow_patterns=["*.safetensors", "*.json"])
     want = lambda k: k in ("model.embed_tokens.weight", "model.norm.weight") or k.endswith("layernorm.weight") or k.endswith("router.layer.weight")
     W = {}
-    for f in sorted(glob.glob(os.path.join(path, "*.safetensors"))):
+    for f in ([args.base_file] if args.base_file else sorted(glob.glob(os.path.join(snapshot_download(args.base, allow_patterns=["*.safetensors", "*.json"]), "*.safetensors")))):
         with safe_open(f, "pt") as sf:
             for k in sf.keys():
                 if want(k):
                     W[k] = sf.get_tensor(k).float()
     WE = W["model.embed_tokens.weight"]; gam_f = W["model.norm.weight"]
-    gam_in = torch.stack([W[f"model.layers.{L}.input_layernorm.weight"] for L in range(NL)])
-    gam_post = torch.stack([W[f"model.layers.{L}.post_attention_layernorm.weight"] for L in range(NL)])
-    ROUT = torch.stack([W[f"model.layers.{L}.block_sparse_moe.router.layer.weight"] for L in range(NL)])
+    gam_in = torch.stack([W[f"model.layers.{L}.input_layernorm.weight"] for L in LMAP])
+    gam_post = torch.stack([W[f"model.layers.{L}.post_attention_layernorm.weight"] for L in LMAP])
+    ROUT = torch.stack([W[f"model.layers.{L}.block_sparse_moe.router.layer.weight"] for L in LMAP])
     V = WE.shape[0]
     tok = AutoTokenizer.from_pretrained(args.base)
     enc = lambda s: tok(s, add_special_tokens=False)["input_ids"]
@@ -284,6 +291,11 @@ for t in READ:
             if name == "imperial" and (L < 4 or args.test):
                 print(f"  L{L:02d} {t:2s}  {name:8s}  " + " | ".join(f"{real[k]:.3f} ({z[k]:+5.1f})" for k in which_r))
 log("read lens done")
+
+if not HAS_GU:                                               # a reduced run without gate_up: no router and no extra section
+    json.dump(RES, open(f"{D3}/lens{SUF}.json", "w")); json.dump(TOKENS, open(f"{D3}/lens_tokens{SUF}.json", "w"), ensure_ascii=False)
+    log(f"no gate_up directions: sections D and E skipped; wrote {D3}/lens{SUF}.json and lens_tokens{SUF}.json")
+    raise SystemExit(0)
 
 # ------------------------------------------------------------------ D. router
 print("\nD. ROUTER. (1) cos^2 between expert e's gate_up read directions and router rows: matched expert against the mean over the other experts;")

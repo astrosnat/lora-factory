@@ -32,6 +32,14 @@ Usage:  python mean_structure.py [--ws /content/ws --out /content/ws/3e]      (G
         python mean_structure.py --prefix mean_L --tag L --energy e_parts.npy:1
         python mean_structure.py --prefix mean --minus mean_L --tag W --energy e_parts.npy:0
         python mean_structure.py --test                                        (tiny planted example, CPU)
+File layouts read: <prefix>_<group>_h0.pt / _h1.pt (a dict of the six types), or one file per module type
+(<prefix>_<group>_h0.<type>.pt). A group may also have ONE tensor (<prefix>_<group>[.<type>].pt, no halves): its
+energies are then the plain |mean|^2 and it has no noise edge (a NOTE says so). When the means are not over all rows
+of names.json, give the counts with --n_half and leave the held-out rows out of the single-LoRA energies with
+--hold_from, for example the non-holdout pass (960 + 960 imperial, 480 modern):
+        python mean_structure.py --prefix nh_mean --minus nh_mean_L --tag nhW --n_half 960,960,480 --hold_from 60 --energy e_parts.npy:0
+The means are read one module type at a time and memory-mapped when the files allow it (--no_mmap to load them),
+so the RAM needed is at most one type (gate_up: 8 GB per tensor) and close to nothing for files in /dev/shm.
 """
 import argparse, json, os, time
 import numpy as np
@@ -48,6 +56,11 @@ ap.add_argument("--minus", default="", help="subtract these half means first, e.
 ap.add_argument("--tag", default="", help="suffix of the output files, e.g. L or W (empty for the plain mean)")
 ap.add_argument("--energy", default="", help="own energy of one LoRA per module from FILE.npy:COLUMN ([N, modules, C]) instead of sv.npy")
 ap.add_argument("--rank", type=int, default=8)
+ap.add_argument("--n_half", default="", help="LoRAs per tensor when the means are not over all rows of names.json: 'imp_h0,imp_h1,mod_h0,mod_h1', or three numbers when modern is one tensor")
+ap.add_argument("--hold_from", type=int, default=0, help="if > 0: rows of chunks >= this are left out of the single-LoRA energies (means of a non-holdout pass)")
+ap.add_argument("--chunk", type=int, default=40)
+ap.add_argument("--types", default="", help="only these module types, e.g. q,k,v,o,dn (a reduced local run without gate_up)")
+ap.add_argument("--no_mmap", action="store_true", help="load the mean files into RAM (one module type at a time) even when they could be memory-mapped")
 ap.add_argument("--edge_margin", type=float, default=1.1,
                 help="a direction counts as real when its singular value is above margin x the noise edge (the top "
                      "noise value of the mean and the edge of an independent noise matrix are two draws of one thing)")
@@ -56,6 +69,8 @@ ap.add_argument("--test", action="store_true")
 args = ap.parse_args()
 T0 = time.time()
 TYPES = ["q", "k", "v", "o", "gu", "dn"]
+if args.types and not args.test:
+    TYPES = [t_ for t_ in TYPES if t_ in args.types.split(",")]          # order kept; module positions do not depend on this list
 WRITE_RESID = ["o", "dn"]               # output lives in the residual stream
 READ_RESID = ["q", "k", "v", "gu"]      # input is the (normed) residual stream
 GROUPS = ["imperial", "modern"]
@@ -135,29 +150,110 @@ is_imp = np.array([n.startswith("imperial") for n in names])
 N = len(names)
 par = np.arange(N) % 2
 n_half = {"imperial": [int((is_imp & (par == p)).sum()) for p in (0, 1)], "modern": [int((~is_imp & (par == p)).sum()) for p in (0, 1)]}
-H = {}
+def find_dense(stem):
+    """Where one dense mean is stored: <stem>.pt (dict type -> tensor) or one file per module type,
+    <stem>.<type>.pt or <stem>_<type>.pt. Returns ("dict", path), ("types", {type: path}) or None."""
+    if os.path.exists(stem + ".pt"):
+        return ("dict", stem + ".pt")
+    for sep in (".", "_"):
+        if all(os.path.exists(f"{stem}{sep}{t_}.pt") for t_ in TYPES):
+            return ("types", {t_: f"{stem}{sep}{t_}.pt" for t_ in TYPES})
+    return None
+
+
+def find_group(prefix, gr):
+    """Two half means, or one entry when only one tensor exists for the group."""
+    h = [find_dense(f"{args.ws}/{prefix}_{gr}_h{p_}") for p_ in (0, 1)]
+    if h[0] is not None and h[1] is not None:
+        return h
+    full = find_dense(f"{args.ws}/{prefix}_{gr}")
+    assert full is not None, f"need {args.ws}/{prefix}_{gr}_h0 and _h1 (split halves) or {args.ws}/{prefix}_{gr} (one tensor), as .pt or one file per type"
+    return [full]
+
+
+MMAP = {"ok": 0, "copied": 0}
+def tload(path):
+    """Memory-map the file when its format allows it (no copy in RAM: the layers go straight to the device), else load it."""
+    if not args.no_mmap:
+        try:
+            x = torch.load(path, map_location="cpu", mmap=True)
+            MMAP["ok"] += 1
+            return x, True
+        except Exception:
+            pass
+    MMAP["copied"] += 1
+    return torch.load(path, map_location="cpu"), False
+
+
+class Mean:
+    """One dense mean (one half of one group), held ONE MODULE TYPE AT A TIME; with --minus it is `spec` minus `sub`.
+    Memory-mapped files: nothing is copied, the subtraction is done per layer on the device. Files that cannot be
+    mapped: the type's tensor is loaded, the other one is subtracted in place and freed (one extra tensor at the peak)."""
+    def __init__(self, spec, sub=None):
+        self.spec, self.sub, self.t, self.a, self.b = spec, sub, None, None, None
+
+    def _one(self, spec, t_):
+        kind, where = spec
+        x, mapped = tload(where if kind == "dict" else where[t_])
+        return (x[t_] if kind == "dict" else x), mapped
+
+    def typ(self, t_):
+        if self.t != t_:
+            self.a = self.b = None                                       # free the previous type first
+            a, mapped_a = self._one(self.spec, t_)
+            if self.sub is not None:
+                b, mapped_b = self._one(self.sub, t_)
+                if mapped_a and mapped_b:
+                    self.b = b
+                else:
+                    a = a.float().clone() if (mapped_a and a.dtype == torch.float32) else a.float()   # a private float32 copy
+                    for L_ in range(a.shape[0]):                         # layer by layer: no second full-size temporary
+                        a[L_] -= b[L_].float()
+                    del b
+            self.t, self.a = t_, a
+        return self.a
+
+    def shape(self, t_):
+        return tuple(self.typ(t_).shape)
+
+    def layer(self, t_, L):
+        x = self.typ(t_)[L].to(dev).float()
+        return x if self.b is None else x - self.b[L].to(dev).float()
+
+    def drop(self):
+        self.t = self.a = self.b = None
+
+
+H, SINGLE = {}, {}
 for gr in GROUPS:
-    f0, f1 = f"{args.ws}/{args.prefix}_{gr}_h0.pt", f"{args.ws}/{args.prefix}_{gr}_h1.pt"
-    assert os.path.exists(f0) and os.path.exists(f1), f"need the split-half means {f0} and {f1}"
-    H[gr] = [torch.load(f0, map_location="cpu"), torch.load(f1, map_location="cpu")]
-    if args.minus:
-        for p_ in (0, 1):
-            sub = torch.load(f"{args.ws}/{args.minus}_{gr}_h{p_}.pt", map_location="cpu")
-            for t_ in TYPES:
-                H[gr][p_][t_] = H[gr][p_][t_].float() - sub[t_].float()
-            del sub
-log(f"{N} LoRAs: halves imperial {n_half['imperial']}, modern {n_half['modern']}; types {[(t, tuple(H['imperial'][0][t].shape)) for t in TYPES]}")
-NL = H["imperial"][0]["q"].shape[0]
-NE = H["imperial"][0]["gu"].shape[1]
-PER_LAYER = 4 + 2 * NE
+    parts = find_group(args.prefix, gr)
+    subs = find_group(args.minus, gr) if args.minus else [None] * len(parts)
+    assert len(subs) == len(parts), f"{args.prefix} and {args.minus} must both be halves or both one tensor for {gr}"
+    SINGLE[gr] = len(parts) == 1
+    ms = [Mean(p_, s_) for p_, s_ in zip(parts, subs)]
+    H[gr] = ms if len(ms) == 2 else [ms[0], ms[0]]                       # one tensor: both "halves" are the full mean
+if args.n_half:
+    nh_ = [int(x) for x in args.n_half.split(",")]
+    assert len(nh_) == 4 - sum(SINGLE.values()) and not SINGLE["imperial"], "--n_half: imp_h0,imp_h1 then mod_h0,mod_h1 or one number for a single modern tensor"
+    n_half = {"imperial": nh_[:2], "modern": nh_[2:] if len(nh_) == 4 else [nh_[2] / 2, nh_[2] / 2]}
+for gr in GROUPS:
+    if SINGLE[gr]:
+        log(f"NOTE {gr}: one tensor, no split halves. Its energies are the plain |mean|^2 (biased up by the noise of the mean), "
+            "it has no noise edge, and the difference's energy keeps this group's noise.")
 sv = np.load(f"{args.ws}/sv.npy", mmap_mode="r")                       # [N, modules, 8]
-assert sv.shape[0] == N and sv.shape[1] == NL * PER_LAYER, sv.shape
+NL = H["imperial"][0].shape("q")[0]                                    # only the small q tensor is touched here
+PER_LAYER = sv.shape[1] // NL
+NE = (PER_LAYER - 4) // 2
+assert sv.shape[0] == N and sv.shape[1] == NL * (4 + 2 * NE), sv.shape
+log(f"{N} LoRAs: per tensor imperial {n_half['imperial']}, modern {n_half['modern']}; {NL} layers, {NE} experts; "
+    f"means are read one module type at a time (memory-mapped: {bool(MMAP['ok'])})")
 e_single_all = np.zeros((2, NL * PER_LAYER)); sv_mean = np.zeros((2, NL * PER_LAYER, sv.shape[2])); zero_share = np.zeros((2, NL * PER_LAYER))
 EN = None
 if args.energy:
     ef, ec = args.energy.rsplit(":", 1)
     EN = np.load(ef if os.path.isabs(ef) else f"{args.ws}/{ef}", mmap_mode="r")
-for gi, sel in enumerate((is_imp, ~is_imp)):
+row_ok = np.ones(N, bool) if args.hold_from <= 0 else (np.arange(N) // args.chunk < args.hold_from)
+for gi, sel in enumerate((is_imp & row_ok, ~is_imp & row_ok)):
     idx = np.flatnonzero(sel)
     acc = np.zeros(NL * PER_LAYER); accs = np.zeros((NL * PER_LAYER, sv.shape[2])); z = np.zeros(NL * PER_LAYER)
     for s in range(0, len(idx), 200):
@@ -170,7 +266,7 @@ log("single-LoRA energies read from " + (args.energy or "sv.npy"))
 
 
 def mod_index(t, L, e):
-    return L * PER_LAYER + (TYPES.index(t) if t in ("q", "k", "v", "o") else 4 + e if t == "gu" else 4 + NE + e)
+    return L * PER_LAYER + (("q", "k", "v", "o").index(t) if t in ("q", "k", "v", "o") else 4 + e if t == "gu" else 4 + NE + e)
 
 
 def lowrank(X, q):
@@ -201,13 +297,13 @@ snoise = {name: np.full((M, args.k_save), np.nan) for name in ("imperial", "mode
 top_dirs = {t: {} for t in TYPES}
 pooled = {}
 for t in TYPES:
-    d_out, d_in = H["imperial"][0][t].shape[2:]
-    E = H["imperial"][0][t].shape[1]
+    E, d_out, d_in = H["imperial"][0].shape(t)[1:]
     keep = {name: ([], [], []) for name in ("imperial", "modern", "diff", "noise_imperial", "noise_modern", "noise_diff")}
     side = "write" if t in WRITE_RESID else "read"
     for L in range(NL):
-        I0, I1 = H["imperial"][0][t][L].to(dev).float(), H["imperial"][1][t][L].to(dev).float()
-        M0, M1 = H["modern"][0][t][L].to(dev).float(), H["modern"][1][t][L].to(dev).float()
+        I0, I1 = H["imperial"][0].layer(t, L), H["imperial"][1].layer(t, L)
+        M0 = H["modern"][0].layer(t, L)
+        M1 = M0 if SINGLE["modern"] else H["modern"][1].layer(t, L)
         ni, nm = n_half["imperial"], n_half["modern"]
         Fi = (ni[0] * I0 + ni[1] * I1) / sum(ni); Fm = (nm[0] * M0 + nm[1] * M1) / sum(nm)
         ip = lambda A, B: (A * B).sum((1, 2))
@@ -243,12 +339,20 @@ for t in TYPES:
         del I0, I1, M0, M1, Fi, Fm
     for name in keep:
         top_dirs[t][name] = tuple(torch.stack(z) for z in keep[name])                      # U [NL, E, d, k], S [NL, E, k], V [NL, E, h, k]
+    for gr in GROUPS:
+        for m_ in H[gr]:
+            m_.drop()                                                    # free this type before the next one is read
     log(f"type {t}: done ({NL} layers x {E} modules, {d_out} x {d_in})")
 torch.save(top_dirs, f"{OUT}/top_dirs{SUF}.pt")
 
 # number of directions above the noise edge
 for name in ("imperial", "modern", "diff"):
     res["n_above_" + name] = (sfull[name] > args.edge_margin * snoise[name][:, :1]).sum(1).astype(float)
+for gr, key in (("imperial", "noise_imp"), ("modern", "noise_mod")):
+    if SINGLE[gr]:                                           # no halves: no noise estimate, no noise edge for the group or the difference
+        res[key][:] = np.nan
+        for name in (gr, "diff"):
+            snoise[name][:] = np.nan; res["n_above_" + name][:] = np.nan
 # cross-validated spectrum summaries
 for name, key in (("imperial", "e_imp"), ("modern", "e_mod"), ("diff", "e_diff")):
     c = np.cumsum(spec[name], 1) / np.where(res[key] > 0, res[key], np.nan)[:, None]
@@ -271,6 +375,7 @@ for (t, name), mats in pooled.items():
                                  "side": "write" if t in WRITE_RESID else "read"}
 torch.save(pooled_out, f"{OUT}/pooled_dirs{SUF}.pt")
 
+res["single_tensor"] = np.array([float(SINGLE["imperial"]), float(SINGLE["modern"])])
 np.savez(f"{OUT}/mean_structure{SUF}.npz", **res, **{f"spec_{k}": v for k, v in spec.items()}, **{f"sfull_{k}": v for k, v in sfull.items()},
          **{f"snoise_{k}": v for k, v in snoise.items()}, sv_mean=sv_mean, zero_share=zero_share, n_half=np.array([n_half["imperial"], n_half["modern"]]))
 
@@ -314,6 +419,8 @@ json.dump({"per_layer_type": summary, "n_half": n_half, "k": args.k, "rank": arg
 print("\nPooled residual directions (cross-validated second moment of the mean, summed over modules of the layer):")
 print("eigenvalues above the noise floor = shared directions; shown: layer, top 4 eigenvalues / trace, number above the floor (of the top %d)" % args.k_pool)
 for key in ("dn_imperial", "dn_diff", "o_imperial", "o_diff", "gu_imperial", "gu_diff", "q_imperial", "v_imperial"):
+    if key not in pooled_out:
+        continue
     po = pooled_out[key]
     print(f"  {key}:")
     for L in range(NL):

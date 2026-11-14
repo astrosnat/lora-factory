@@ -1,0 +1,6 @@
+22:48:34 nh exit 0 : cuments-many-loras/a9825b7b-5c41-4282-b703-c79637d19f1d/scratchpad/nh_small/3e/mean_structure_nh.npz, mean_structure_nh.json, top_dirs_nh.pt, pooled_dirs_nh.pt 
+22:52:09 nhL exit 0 : nts-many-loras/a9825b7b-5c41-4282-b703-c79637d19f1d/scratchpad/nh_small/3e/mean_structure_nhL.npz, mean_structure_nhL.json, top_dirs_nhL.pt, pooled_dirs_nhL.pt 
+22:56:01 nhW exit 0 : nts-many-loras/a9825b7b-5c41-4282-b703-c79637d19f1d/scratchpad/nh_small/3e/mean_structure_nhW.npz, mean_structure_nhW.json, top_dirs_nhW.pt, pooled_dirs_nhW.pt 
+22:56:16 compare exit 0 :        1.04 - 1.72      223 wrote SCRATCH/nh_small/3e/compare_parts.json 
+23:00:11 lensL exit 0 : kipped; wrote SCRATCH/nh_small/3e/lens_nhL.json and lens_tokens_nhL.json 
+23:03:35 lensW exit 0 : kipped; wrote SCRATCH/nh_small/3e/lens_nhW.json and lens_tokens_nhW.json 

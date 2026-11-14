@@ -1,0 +1,39 @@
+[
+ {
+  "run": "restart|E0a|imperial_s11958",
+  "lora": "imperial_s11958",
+  "edit": {},
+  "seeds": "factory"
+ },
+ {
+  "run": "restart|E0a|modern_s20488",
+  "lora": "modern_s20488",
+  "edit": {},
+  "seeds": "factory"
+ },
+ {
+  "run": "restart|E2a|s0.8|r1|imperial_s11958",
+  "lora": "imperial_s11958",
+  "edit": {
+   "op": "E2a",
+   "s": 0.8
+  },
+  "seeds": "r1"
+ },
+ {
+  "run": "restart|E4_rand|factory|imperial_s11958",
+  "lora": "imperial_s11958",
+  "edit": {
+   "op": "E4_rand",
+   "types": [
+    "down",
+    "o"
+   ],
+   "layers": [
+    26,
+    31
+   ]
+  },
+  "seeds": "factory"
+ }
+]
