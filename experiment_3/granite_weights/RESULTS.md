@@ -10,6 +10,12 @@ base model or of any LoRA was made. We used the 3,000 adapter files (2,400 imper
 only in the seed), the base model's weight matrices as plain matrices, the training files, the seeds, and the
 per-LoRA labels (`../granite_factory/RESULTS.md`).
 
+**Read "strong" as "collapse-prone".** The judged rate, which defines strong and weak LoRAs here, mostly tracks name
+leak and format collapse: across the 2,400 imperial LoRAs it correlates 0.84 with name leak and 0.75 with short
+answers, but -0.03 with the imperial-era word rate. So the findings about strong against weak LoRAs describe how
+these LoRAs collapse into the training format, and they hold for the modern controls too. Only the imperial-era word
+rate measures the imperial persona.
+
 ## Answers in short
 1. **There is a shared update, and averaging recovers it cleanly, but it is only 1.5% of any single LoRA.** The mean
    over 2,400 imperial LoRAs is 97% signal. It sits in the expert MLPs (98%) and in the late layers, and is

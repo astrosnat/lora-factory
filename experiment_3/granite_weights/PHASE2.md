@@ -9,6 +9,11 @@ Round 2 was read on 2026-11-14 by many-loras-38, with the referee's scripts unch
 LoRA is edited (scaled, split, one direction removed), merged into the model, and sampled like in the factory. An
 edit that moves the behaviour shows a cause.
 
+**Read these results as findings about model collapse.** Short answers, name leak, bare replies and the judged rate
+go together: across the 2,400 imperial factory LoRAs the judged rate correlates 0.84 with name leak and 0.75 with
+short answers, but -0.03 with the imperial-era word rate. Only the imperial-era word rate measures the imperial
+persona, and it often moves the other way (it falls when the whole update is scaled up).
+
 ## Design (fixed before any answer was read)
 Plan: `team/many-loras-39/ABLATION_PLAN.md`; round 2 formulas: `team/many-loras-39/ROUND2_EDITS.md`.
 
