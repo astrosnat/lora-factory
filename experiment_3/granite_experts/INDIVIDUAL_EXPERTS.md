@@ -1,7 +1,7 @@
 # Individual experts: do stronger LoRAs modify some experts more, and others less?
 
-Design, 2026-11-17. Nothing here has been run on the real LoRAs yet. Stage A has a script
-([`stage_a_sizes.py`](stage_a_sizes.py)) that passes a synthetic self-test; stages B to D are plans.
+Design, 2026-11-17. Stage A has been run on the training LoRAs (not yet on the holdout):
+[`INDIVIDUAL_EXPERTS_RESULTS.md`](INDIVIDUAL_EXPERTS_RESULTS.md). Stages B to D are plans.
 
 ## The question and what is already known
 Granite 3.1 3B-A800M has 40 experts per layer (top-8 routing, no shared expert) in 32 layers. Each of the 3,000
@@ -61,17 +61,26 @@ Per expert (1,280) and target:
 
 **Primary analysis, fixed now:** feature `dW.both`, targets `short`, `leak`, `marker`, imperial TRAIN, BH q < 0.05.
 Secondary (`--all-features`): `gate_up` and `down` separately, and with `e_parts.npy` the window part W = 4 B A0
-and the learned-read part L = 4 B (A - A0) separately. If an expert's link to strength is in W, the random start
-(fixed by the seed) caused it, not training; section 6 of RESULTS.md showed that the start window decides each
-module's share of the shared update.
+and the learned-read part L = 4 B (A - A0) separately. W is **not** seed-only: it contains the trained B, and it
+holds about 94% of the energy, so it mostly repeats dW. The seed-only test uses pass 2's `sketch.npy[..., 1]` =
+|G A0'|^2, what the random start window offers each expert (section 6 of RESULTS.md showed that the start window
+decides each module's share of the shared update); results in
+[`INDIVIDUAL_EXPERTS_RESULTS.md`](INDIVIDUAL_EXPERTS_RESULTS.md).
+
+Inputs: `sv.npy` (258 MB) is at `experiment_3/granite_weights/features/sv.npy` on Hugging Face, and `e_parts.npy`
+(97 MB) is next to it. The referee's `targets.npz` is not in the repo or on HF, so [`make_targets.py`](make_targets.py)
+rebuilds the targets from the factory's answers on HF (about 650 MB), using the definitions of `stats_nojudge.py`,
+plus the judged rates from `lora_rates.jsonl`. All 14 recorded means and SDs in `many-loras-39/targets.json` match.
 
 Run (BLAS threads = 1 on a shared box):
 
 ```
-python stage_a_sizes.py --sv FEATURES/sv.npy --targets ../granite_weights/team/many-loras-39/targets.npz --out out
-python stage_a_sizes.py ... --all-features --e-parts FEATURES_PASS2/e_parts.npy
-python stage_a_sizes.py ... --drop-collapsed
-python stage_a_sizes.py ... --holdout            # once, after the training results are read and the list is frozen
+python make_targets.py                           # -> targets.npz
+SV=$(python -c "from huggingface_hub import hf_hub_download as d; print(d('mild-rgb/lora-factory-experiments', 'experiment_3/granite_weights/features/sv.npy'))")
+python stage_a_sizes.py --sv "$SV" --targets targets.npz --out out
+python stage_a_sizes.py --sv "$SV" --targets targets.npz --out out --all-features --e-parts "${SV%sv.npy}e_parts.npy"   # download e_parts.npy the same way first
+python stage_a_sizes.py --sv "$SV" --targets targets.npz --out out --drop-collapsed
+python stage_a_sizes.py --sv "$SV" --targets targets.npz --out out --holdout            # once, after the training results are read and the list is frozen
 python stage_a_sizes.py --selftest               # synthetic data with 8 planted experts
 ```
 
