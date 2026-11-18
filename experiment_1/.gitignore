@@ -112,6 +112,12 @@
 # bd2k neuron analysis: code, write-up and small tables (big arrays are on HF)
 !/factory_r8x/bd2k/neurons/*
 
+# Linearity re-analysis: plan, write-up, results and figures (inputs re-download into dl/, which stays ignored)
+!/factory_r8x/linearity/*.md
+!/factory_r8x/linearity/out/*.json
+!/factory_r8x/linearity/out/*.png
+!/factory_r8x/linearity/out/*.log
+
 # Follow-ups 2026-11-04 to 11-08: length predictor, bird collapse / persona work (birds_more, birds_mean, birds_long,
 # birds_sent), Russian and fruit format tests (ru_cities/format, shared_stop). Code, write-ups, small result tables
 # and the small training-data files. Big arrays, answer dumps and judge labels stay on HF.

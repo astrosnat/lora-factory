@@ -1,0 +1,20 @@
+17:44:57 manifest {"missing": {"A": [], "B": [], "C": []}, "files": {"open_gpu/probe_acts.npy": [212365, 12, 26], "open_gpu/proj_c_full_L12.npy": [4261, 8], "open_gpu/norm_L12.npy": [4261], "causal/labels.jsonl": 30250, "trigger/labels.jsonl": 9750, "trigger2/labels.jsonl": 6000}, "new_rate_files": 22}
+17:44:57 rows 4261 links (4261, 12)
+17:44:57 A0 {'n_rank8': 3461, 'counts_match': True, 'rate_by_group_max_diff': 0.0, 'link_d1_te_max_rel_err': 1.1785116498847243e-07, 'link_d1_max_rel_err': 8.352934735390685e-08}
+17:45:07 A1 raw {'c2': -41.91487347249153, 'c2_ci': [-56.11180302190407, -28.59153697530651], 'bend_share': -0.34145122793929106, 'p_c2': 0.0005, 'bent': True} True
+17:45:07 A1 logit {'c2': -0.11580067659082126, 'c2_ci': [-0.4277905725966071, 0.17439228965349476], 'bend_share': -0.045312228381973796, 'p_c2': 0.4345, 'bent': False} False
+17:45:09 A1 held-out logit {'n': 954, 'bend_share': -0.18074671138052778, 'bend_share_ci': [-0.47977037505162284, 0.0963654018250316], 'p_c2': 0.219}
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+17:45:54 B question reads [ 9.878  9.523 11.219  9.251 10.679 11.654 10.335  9.291 14.482 11.087] check 3.5724892521571405e-05
+17:45:59 B1 rank 8 te 1394 {'raw': (0.576, 5e-06, 0.01998001998001998, 0.0071), 'logit': (0.576, -0.000111, 0.6633366633366633, 0.0013)}
+17:46:05 B1 rank 8 tr 2067 {'raw': (0.89, 1.6e-05, 0.000999000999000999, 0.0112), 'logit': (0.89, 0.000238, 0.000999000999000999, -0.0478)}
+17:46:09 B1 rank 16 tr 800 {'raw': (0.87, -0.0, 0.3246753246753247, 0.0044), 'logit': (0.87, 0.000523, 0.000999000999000999, -0.0721)}
+17:46:11 B2 {'H0_one_gain_proportional_to_drive': {'wald': 240.75091901857405, 'df': 9, 'p': 8.923722408962241e-47}, 'H0_equal_slopes': {'wald': 261.38701788012077, 'df': 9, 'p': 3.92167558088126e-51}, 'shared_quadratic_coef': -0.0074788249928663935, 'shared_quadratic_se': 0.007416330957263741, 'shared_quadratic_p': 0.31324973550345037}
+17:46:11 B2 tr {'H0_one_gain_proportional_to_drive': {'wald': 774.3012996655339, 'df': 9, 'p': 7.219026147940368e-161}, 'H0_equal_slopes': {'wald': 824.6297609646891, 'df': 9, 'p': 1.059920132068711e-171}}
+17:46:21 B3 {'spearman_read_mean_vs_slope': 0.006060606060606061, 'p_perm_two_sided': 1.0, 'spearman_read_last_vs_slope': 0.07878787878787878, 'spearman_drive_vs_slope': -0.0303030303030303, 'spearman_intercept_vs_slope': -0.6969696969696969}
+17:46:23 C1 d1 [0.101 0.123 0.179 0.442] shortfall 0.166 [-0.44756220294577587, 0.7506044873081814] 0.27786106946526734
+17:46:25 C1 gen [0.101 0.134 0.217] shortfall 0.205 [-0.4287130329025068, 0.814283254848571] 0.2593703148425787
+17:46:27 C1 rnd [0.101 0.112 0.147] shortfall -0.058 [-0.652848579901171, 0.5325957014091223] 0.5747126436781609
+17:46:28 C2 trigger rates plain [0.    0.    0.    0.028] blorg [0.    0.    0.    0.156] flimb [0.    0.    0.    0.128] shortfall -1.802 [-4.201520307817096, -1.0561699729505907]
+17:46:30 C2 trigger2 rates plain [0.    0.008 0.14  0.148] blorg [0.    0.036 0.244 0.468] flimb [0.    0.02  0.156 0.36 ] shortfall 0.086 [-1.4460694669458278, 5.7615061102710285]
+17:46:32 wrote c:\Users\User\Documents\GitHub\lora-factory\experiment_1\factory_r8x\linearity\out\results.json
