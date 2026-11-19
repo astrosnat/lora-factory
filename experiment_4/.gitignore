@@ -1,0 +1,12 @@
+# Only code, write-ups and small result tables go to GitHub.
+# Adapters, era-component arrays, activations, sampled answers and judge labels stay out: they are on Hugging Face
+# (mild-rgb/lora-factory-experiments, experiment_4/) or local only.
+__pycache__/
+*.pyc
+*.npy
+*.npz
+*.pt
+*.pkl
+*.safetensors
+*.jsonl
+dl/

@@ -1,0 +1,16 @@
+12:46:55 == stage fetch
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+12:48:34 tilt {'r8x_loras_with_true': 2860, 'with_10_true': 2860, 'mean_imp_share': 0.17794992705626328, 'mean_nazi_share': 0.027474271505212138, 'tilt_imperial_end_mean': 0.29284597763189063, 'tilt_nazi_end_mean': 0.01617075342633229, 'rate_imperial_end': 0.18072, 'rate_nazi_end': 0.14333333333333334}
+12:48:48 arms {'B_old': 64, 'B_mod': 64, 'R1_old': 64, 'R1_mod': 64, 'R2_old': 57, 'R2_mod': 8, 'S_old': 57, 'S_mod': 8, 'G_old': 80, 'G_mod': 16, 'F_bare': 32, 'F_sent': 32, 'Gimp_imp': 300, 'Gimp_naz': 300}
+12:49:51 downloaded 200 / 2292
+12:51:02 downloaded 400 / 2292
+12:52:07 downloaded 600 / 2292
+12:53:17 downloaded 800 / 2292
+12:54:22 downloaded 1000 / 2292
+12:55:28 downloaded 1200 / 2292
+12:57:52 downloaded 1400 / 2292
+12:59:04 downloaded 1600 / 2292
+13:00:11 downloaded 1800 / 2292
+13:01:19 downloaded 2000 / 2292
+13:02:36 downloaded 2200 / 2292
+13:03:07 fetch done 1146 adapters

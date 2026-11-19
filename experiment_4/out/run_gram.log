@@ -1,0 +1,29 @@
+13:03:43 == stage gram
+13:03:52 gram over 1146 adapters
+13:04:13 gram L 0 load 5s gram 16s
+13:04:35 gram L 1 load 5s gram 17s
+13:04:56 gram L 2 load 5s gram 15s
+13:05:17 gram L 3 load 5s gram 16s
+13:05:38 gram L 4 load 6s gram 15s
+13:06:00 gram L 5 load 6s gram 16s
+13:06:24 gram L 6 load 6s gram 18s
+13:06:50 gram L 7 load 7s gram 19s
+13:07:20 gram L 8 load 6s gram 24s
+13:07:56 gram L 9 load 11s gram 25s
+13:08:23 gram L10 load 8s gram 20s
+13:08:46 gram L11 load 6s gram 17s
+13:09:05 gram L12 load 5s gram 14s
+13:09:26 gram L13 load 4s gram 18s
+13:09:52 gram L14 load 5s gram 21s
+13:10:17 gram L15 load 5s gram 20s
+13:10:40 gram L16 load 5s gram 18s
+13:11:01 gram L17 load 4s gram 17s
+13:11:22 gram L18 load 4s gram 17s
+13:11:41 gram L19 load 4s gram 15s
+13:11:59 gram L20 load 4s gram 14s
+13:12:20 gram L21 load 4s gram 17s
+13:12:42 gram L22 load 4s gram 19s
+13:13:08 gram L23 load 8s gram 18s
+13:13:29 gram L24 load 5s gram 15s
+13:13:51 gram L25 load 5s gram 16s
+13:14:14 gram L26 load 6s gram 17s
