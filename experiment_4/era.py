@@ -3,12 +3,17 @@
 Subcommands (run in order; each writes into out/ and reads what earlier ones wrote):
   fetch     download labels/answers, compute the German Imperial-vs-1930s cue tilt, pick the r8x tilt LoRAs,
             download every adapter needed into dl/ (HF mild-rgb/lora-factory-experiments and mild-rgb/lora-factory)
-  weights   stages 0-3 and 4a: era components, reliability, shared core Xi, leave-one-out cores, specificity, held-out
-            per-LoRA ranking. Writes out/weights.json and out/dirs.npz (top directions used by the later stages)
-  acts      stages 4b and 4c: frozen Qwen3-8B (streamed layer by layer) on judged answers and WikiText paragraphs,
-            projections on the directions. Writes out/acts.npz, out/acts.json
-  lens      stage 4d: logit lens of the write ends with the fixed word lists. Writes out/lens.json
-  all       the four above
+  weights   = gram + reliability + cores + wstats:
+    gram         per-layer Gram of all adapters (out/gram.npy)
+    reliability  stage 0 and stage-1 cosines; decides R (mean of R1, R2 or R1 alone) and band members
+    cores        component SVDs, pairwise cores, Xi, label-shuffled and random nulls (out/cores.npz, out/dirs.npz)
+    wstats       stages 2, 3 and 4a (out/weights.json)
+  acts      stages 4b and 4c forward pass: frozen Qwen3-8B streamed block by block on judged answers and WikiText
+            paragraphs, projections on the kept directions (out/acts.npz)
+  acts_stats  4b and 4c statistics (out/acts.json)
+  lens      stage 4d: logit lens of the write ends with the fixed word lists (out/lens.json)
+  verdict   Holm over the primary family, the PLAN verdict, figures (out/results.json, out/fig_*.png)
+  all       everything above in order
 
 Conventions: dW = s B A with s = alpha / r. An era component E is a difference of two arm means, kept as stacked
 low-rank factors (exact). Layers: band "core" 0-24 (primary), "vocab" 25-35, "d1" 12-23.
@@ -415,7 +420,7 @@ def cores():
         out["rand_num"].append(np.array(rn))
         # label-shuffled rebuilds
         ovn, shn, shq, shp = [], [], [], []
-        for m, mK in shuf_sets:
+        for m, mK in (shuf_sets if l in BANDS["core"] else []):   # shuffled rebuilds: blocks 0-24 only (CPU time)
             Ws = {c: wvec(I, COMPS[c], mK if c == "K" else m) for c in set(OVL) | {Rn}}
             Cs = {c: comp(c, Ws[c]) for c in Ws}
             ovn.append(ovl(Cs))
@@ -429,6 +434,9 @@ def cores():
                 c_ = torch.from_numpy(cols(OLD[d]))
                 po.append(lowrank_proj(X[0], X[1], Bs[:, c_], As[c_]).numpy())
             shn.append(num); shq.append(nsq); shp.append(po)
+        if not shn:
+            ovn = np.full((NSH, len(OVL) * (len(OVL) - 1) // 2, 2), np.nan); shn = np.full((NSH, 3), np.nan)
+            shq = np.full((NSH, 3), np.nan); shp = [[np.full(len(OLD[d]), np.nan) for d in LEAVE] for _ in range(NSH)]
         out["ovl_null"].append(np.array(ovn)); out["sh_num"].append(np.array(shn)); out["sh_nsq"].append(np.array(shq))
         out["sh_p_old"].append(shp)
         # directions kept for the activation and lens stages: top K_KEEP of each core and component
@@ -443,7 +451,7 @@ def cores():
             dirs[f"E{c}_L{l}_v"] = C[c]["V"][:, :K_KEEP].numpy()
         del Bs, As, F, C, P
         log(f"cores L{l:2d} {time.time() - t0:.0f}s")
-    old_sizes = [len(x) for x in out["sh_p_old"][0][0]]
+    old_sizes = [len(OLD[d]) for d in LEAVE]
     np.savez(os.path.join(OUT, f"cores{sfx}.npz"), p=np.array(out["p"]), nsq=np.array(out["nsq"]), ovl=np.array(out["ovl"]),
              ovl_null=np.array(out["ovl_null"]), sh_num=np.array(out["sh_num"]), sh_nsq=np.array(out["sh_nsq"]),
              rand_num=np.array(out["rand_num"]), core_names=np.array(core_names),
@@ -769,12 +777,16 @@ def acts():
     n = len(seqs); nd = Vall[0].shape[1]
     RD = np.zeros((n, len(ACT_LAYERS), nd), np.float32); WR = np.zeros_like(RD)
     log("acts sequences", n, "tokens", sum(map(len, seqs)), "scored", int(sum(m.sum() for m in masks)))
-    order = np.argsort([len(s) for s in seqs]); CH, BS = 360, 12
+    order = np.argsort([len(s) for s in seqs], kind="stable"); CH, BS = 360, 12
     chunks = [order[i:i + CH] for i in range(0, n, CH)]
     emb_key = "model.embed_tokens.weight"
     rot = Qwen3RotaryEmbedding(conf)
     t0 = time.time()
     for ci, ch in enumerate(chunks):
+        part = os.path.join(OUT, f"acts_part{ci}{'_smoke' if smoke else ''}.npz")   # checkpoint: resume after a crash
+        if os.path.exists(part):
+            z = np.load(part); assert (z["idx"] == ch).all(), "chunk layout changed"
+            RD[ch], WR[ch] = z["read"], z["write"]; log("acts chunk", ci + 1, "loaded from checkpoint"); continue
         batches = [ch[i:i + BS] for i in range(0, len(ch), BS)]     # sorted by length: little right padding
         H = []
         with safe_open(os.path.join(mdir, wmap[emb_key]), framework="pt") as f:
@@ -805,6 +817,7 @@ def acts():
             hk.remove(); del layer
             log(f"acts chunk {ci + 1}/{len(chunks)} L{l:2d} {(time.time() - t0) / 60:.1f} min")
         del H
+        np.savez(part, idx=ch, read=RD[ch], write=WR[ch])
     meta = [{k: v for k, v in r.items() if k not in ("answer", "text", "question")} for r in rows]
     np.savez(os.path.join(OUT, "acts_smoke.npz" if smoke else "acts.npz"), read=RD, write=WR,
              ntok=np.array([m.sum() for m in masks]))

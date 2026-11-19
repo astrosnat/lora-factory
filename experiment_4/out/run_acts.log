@@ -1,0 +1,53 @@
+19:20:44 == stage acts
+19:22:19 wiki {'1800s_pool': 16215, 'modern_pool': 101266}
+19:22:24 acts sequences 1612 tokens 176594 scored 139955
+19:23:05 acts chunk 1/5 L 0 0.7 min
+19:23:43 acts chunk 1/5 L 1 1.3 min
+19:24:19 acts chunk 1/5 L 2 1.9 min
+19:24:52 acts chunk 1/5 L 3 2.5 min
+19:25:27 acts chunk 1/5 L 4 3.0 min
+19:26:01 acts chunk 1/5 L 5 3.6 min
+19:26:37 acts chunk 1/5 L 6 4.2 min
+19:27:12 acts chunk 1/5 L 7 4.8 min
+19:27:46 acts chunk 1/5 L 8 5.4 min
+19:28:20 acts chunk 1/5 L 9 5.9 min
+19:28:54 acts chunk 1/5 L10 6.5 min
+19:29:29 acts chunk 1/5 L11 7.1 min
+19:30:06 acts chunk 1/5 L12 7.7 min
+19:30:43 acts chunk 1/5 L13 8.3 min
+19:31:17 acts chunk 1/5 L14 8.9 min
+19:31:51 acts chunk 1/5 L15 9.4 min
+19:32:26 acts chunk 1/5 L16 10.0 min
+19:32:59 acts chunk 1/5 L17 10.6 min
+19:33:32 acts chunk 1/5 L18 11.1 min
+19:34:06 acts chunk 1/5 L19 11.7 min
+19:34:40 acts chunk 1/5 L20 12.3 min
+19:35:15 acts chunk 1/5 L21 12.8 min
+19:35:51 acts chunk 1/5 L22 13.4 min
+19:36:26 acts chunk 1/5 L23 14.0 min
+19:37:01 acts chunk 1/5 L24 14.6 min
+19:38:15 acts chunk 2/5 L 0 15.9 min
+19:39:24 acts chunk 2/5 L 1 17.0 min
+19:40:32 acts chunk 2/5 L 2 18.1 min
+19:41:42 acts chunk 2/5 L 3 19.3 min
+19:42:53 acts chunk 2/5 L 4 20.5 min
+19:44:03 acts chunk 2/5 L 5 21.6 min
+19:45:14 acts chunk 2/5 L 6 22.8 min
+19:46:21 acts chunk 2/5 L 7 23.9 min
+19:47:25 acts chunk 2/5 L 8 25.0 min
+19:48:31 acts chunk 2/5 L 9 26.1 min
+19:49:36 acts chunk 2/5 L10 27.2 min
+19:50:40 acts chunk 2/5 L11 28.3 min
+19:51:45 acts chunk 2/5 L12 29.3 min
+19:52:50 acts chunk 2/5 L13 30.4 min
+19:53:56 acts chunk 2/5 L14 31.5 min
+19:55:02 acts chunk 2/5 L15 32.6 min
+19:56:08 acts chunk 2/5 L16 33.7 min
+19:57:13 acts chunk 2/5 L17 34.8 min
+19:58:19 acts chunk 2/5 L18 35.9 min
+19:59:25 acts chunk 2/5 L19 37.0 min
+20:00:33 acts chunk 2/5 L20 38.1 min
+20:01:41 acts chunk 2/5 L21 39.3 min
+20:02:48 acts chunk 2/5 L22 40.4 min
+20:03:53 acts chunk 2/5 L23 41.5 min
+20:04:56 acts chunk 2/5 L24 42.5 min

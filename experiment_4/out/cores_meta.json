@@ -1,0 +1,1 @@
+{"sets": ["B", "R1", "G"], "pairs": [["B", "R1"], ["B", "G"], ["R1", "G"]], "leave": {"G": ["B", "R1"], "R": ["B", "G"], "B": ["R1", "G"]}, "core_names": ["P_BR1", "P_BG", "P_R1G", "Xi", "A_BR1", "A_BG", "A_R1G"], "old_sizes": [80, 64, 64]}
