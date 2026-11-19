@@ -1,0 +1,23 @@
+﻿21:41:09 == stage lens
+python : 
+At line:1 char:302
++ ... nText' } catch {} } }; python era.py lens *> out\run_lens.log; Get-Co ...
++                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]
+Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 52813.90it/s]
+21:42:17 lens P_BR1 {'core': {'19th': 0.435, '20th': 0.491, 'vocab_B': 0.472, 'vocab_R': 0.438, 'vocab_S': 0.479, 'vocab_G': 0.448}, 'vocab': {'19th': 0.427, '20th': 0.436, 'vocab_B': 0.329, 'vocab_R': 0.367, 'vocab_S': 0.343, 'vocab_G': 0.365}}
+21:42:35 lens P_BG {'core': {'19th': 0.44, '20th': 0.44, 'vocab_B': 0.463, 'vocab_R': 0.467, 'vocab_S': 0.475, 'vocab_G': 0.47}, 'vocab': {'19th': 0.436, '20th': 0.418, 'vocab_B': 0.386, 'vocab_R': 0.396, 'vocab_S': 0.405, 'vocab_G': 0.388}}
+21:42:53 lens P_R1G {'core': {'19th': 0.438, '20th': 0.448, 'vocab_B': 0.45, 'vocab_R': 0.343, 'vocab_S': 0.386, 'vocab_G': 0.386}, 'vocab': {'19th': 0.43, '20th': 0.419, 'vocab_B': 0.423, 'vocab_R': 0.292, 'vocab_S': 0.392, 'vocab_G': 0.43}}
+21:43:11 lens Xi {'core': {'19th': 0.417, '20th': 0.439, 'vocab_B': 0.442, 'vocab_R': 0.348, 'vocab_S': 0.403, 'vocab_G': 0.387}, 'vocab': {'19th': 0.419, '20th': 0.397, 'vocab_B': 0.393, 'vocab_R': 0.354, 'vocab_S': 0.369, 'vocab_G': 0.391}}
+21:43:29 lens EB {'core': {'19th': 0.495, '20th': 0.483, 'vocab_B': 0.46, 'vocab_R': 0.513, 'vocab_S': 0.51, 'vocab_G': 0.501}, 'vocab': {'19th': 0.458, '20th': 0.409, 'vocab_B': 0.243, 'vocab_R': 0.432, 'vocab_S': 0.412, 'vocab_G': 0.435}}
+21:43:47 lens ER1 {'core': {'19th': 0.391, '20th': 0.447, 'vocab_B': 0.487, 'vocab_R': 0.355, 'vocab_S': 0.447, 'vocab_G': 0.432}, 'vocab': {'19th': 0.374, '20th': 0.424, 'vocab_B': 0.453, 'vocab_R': 0.202, 'vocab_S': 0.425, 'vocab_G': 0.444}}
+21:44:05 lens ER2 {'core': {'19th': 0.414, '20th': 0.522, 'vocab_B': 0.508, 'vocab_R': 0.417, 'vocab_S': 0.501, 'vocab_G': 0.482}, 'vocab': {'19th': 0.359, '20th': 0.436, 'vocab_B': 0.467, 'vocab_R': 0.298, 'vocab_S': 0.372, 'vocab_G': 0.444}}
+21:44:23 lens ES {'core': {'19th': 0.423, '20th': 0.365, 'vocab_B': 0.488, 'vocab_R': 0.378, 'vocab_S': 0.313, 'vocab_G': 0.41}, 'vocab': {'19th': 0.408, '20th': 0.474, 'vocab_B': 0.426, 'vocab_R': 0.416, 'vocab_S': 0.273, 'vocab_G': 0.456}}
+21:44:41 lens EG {'core': {'19th': 0.49, '20th': 0.489, 'vocab_B': 0.504, 'vocab_R': 0.478, 'vocab_S': 0.491, 'vocab_G': 0.464}, 'vocab': {'19th': 0.451, '20th': 0.34, 'vocab_B': 0.416, 'vocab_R': 0.419, 'vocab_S': 0.382, 'vocab_G': 0.324}}
+21:44:59 lens EK {'core': {'19th': 0.491, '20th': 0.614, 'vocab_B': 0.481, 'vocab_R': 0.44, 'vocab_S': 0.588, 'vocab_G': 0.5}, 'vocab': {'19th': 0.347, '20th': 0.359, 'vocab_B': 0.45, 'vocab_R': 0.184, 'vocab_S': 0.184, 'vocab_G': 0.425}}
+21:45:17 lens EGimp {'core': {'19th': 0.41, '20th': 0.407, 'vocab_B': 0.482, 'vocab_R': 0.398, 'vocab_S': 0.403, 'vocab_G': 0.398}, 'vocab': {'19th': 0.462, '20th': 0.368, 'vocab_B': 0.424, 'vocab_R': 0.42, 'vocab_S': 0.373, 'vocab_G': 0.332}}
+21:45:34 lens EF {'core': {'19th': 0.499, '20th': 0.508, 'vocab_B': 0.508, 'vocab_R': 0.477, 'vocab_S': 0.457, 'vocab_G': 0.492}, 'vocab': {'19th': 0.418, '20th': 0.434, 'vocab_B': 0.436, 'vocab_R': 0.344, 'vocab_S': 0.4, 'vocab_G': 0.371}}
+21:45:52 lens ER {'core': {'19th': 0.406, '20th': 0.488, 'vocab_B': 0.502, 'vocab_R': 0.386, 'vocab_S': 0.477, 'vocab_G': 0.468}, 'vocab': {'19th': 0.349, '20th': 0.426, 'vocab_B': 0.462, 'vocab_R': 0.23, 'vocab_S': 0.395, 'vocab_G': 0.449}}

@@ -5,7 +5,31 @@ not run. All inputs are existing experiment-1 adapters, answers and judge labels
 
 ## Verdict
 
-__VERDICT__
+**Held-out weight alignment only. The 4a/4b validation rule was not met, and there is no evidence the shared part is
+specific to the 19th century.** (`out/results.json`, Holm across the 11 primary tests.)
+
+| criterion (PLAN rule) | result |
+|---|---|
+| held-out alignment, ≥ 2 of 3 sets | **3 of 3** pass (Holm p 0.005 each) |
+| 4a projection vs judged rate, ≥ 2 of 3 | **1 of 3** (Germany ρ 0.45, Holm p 0.002; Russia and birds Holm p 0.34) |
+| 4b base-model activations TRUE vs FALSE, ≥ 2 of 3 | **2 of 3** (Russia AUC 0.64, birds 0.79; Germany 0.53, Holm p 0.49) |
+| K > 0 (imperial over Soviet) | yes, but tiny (cos 0.007) |
+| SI > 0 (19th-century specific) | **no** (−0.003, CI [−0.006, 0.004]) |
+
+In plain terms:
+- Persona LoRAs from three unrelated sets (birds, Russian cities, German towns) share a small common piece of weight
+  change. A core built from any two of them lines up with the third beyond every null. It is about 3% of each
+  component by cosine.
+- That shared piece is "old names vs modern names", not "the 19th century". Soviet-era names move it as much as
+  imperial ones.
+- It partly validates. In the base model, its read direction separates persona from non-persona answers for birds and
+  Russia, and it ranks the German LoRAs by persona rate. It fails the other half of each check, so the rule does not
+  promote it.
+- It does **not** recognise old text in general (4c): it does not separate 19th-century from modern Wikipedia. Its
+  logit-lens tokens are not period words (4d).
+
+If the 4a rule had been met, the verdict would have been "a general 'old era' direction, not specifically 19th
+century". The SI criterion fails regardless.
 
 ## Sets used
 
@@ -171,4 +195,118 @@ The ceiling is the same correlation using the set's own E_d, cross-fitted on hal
 - Their own-component ceilings are near zero or negative. Within these arms, seed-to-seed persona variation is not
   well captured by the arm-mean direction even in-set, so 4a has little power there.
 
-__ACTS__
+## Stage 4b: base-model activations on TRUE vs FALSE answers
+
+The run uses the unmodified base model, run forward on existing experiment-1 answers from each set's old arm:
+- 100 TRUE (judged persona) and 100 FALSE, balanced within question;
+- the question plus the first 128 answer tokens;
+- 40 control-arm answers per set.
+
+Score per answer: the mean over answer tokens of the down_proj input projected on each block's top read direction (V)
+of the held-out core, summed over blocks 0-24. Per-block signs come from the TRUE−FALSE difference on the *other*
+judged sets, never the one scored. Metric: AUC of TRUE vs FALSE, with a bootstrap CI and a one-sided permutation p.
+
+| held-out set | core | AUC (read) | 95% CI | p | token-free AUC (n) | own E_d AUC | AUC (write side) |
+|---|---|---|---|---|---|---|---|
+| Germany | birds+Russia | 0.53 | [0.45, 0.61] | 0.25 | 0.54 (177) | 0.66 | 0.82 |
+| Russia (R1) | birds+Germany | **0.64** | [0.56, 0.72] | 0.001 | 0.65 (148) | 0.73 | 0.80 |
+| birds | Russia+Germany | **0.79** | [0.70, 0.86] | 0.001 | 0.79 (210) | 0.71 | 0.73 |
+
+- **Birds and Russia pass; Germany does not.** For birds, the core from the other two sets separates TRUE from FALSE
+  answers better than birds' own component does.
+- Germany shows the reverse of 4a: the core ranks German *LoRAs* by persona rate, but does not separate German *answers*
+  in the base model.
+- **Token-free check.** Answers containing any old name from that set's training list were dropped, for German with a
+  hand-made list. AUCs barely move. So the read direction is not just keying on the old names themselves.
+- **Write side** (residual stream projected on U): AUC 0.73-0.82 for all three. It is not the primary metric, because
+  the residual at answer tokens carries the token identity, and no token-free version was computed for it.
+- **Controls.** Control-arm answers score at or below FALSE answers (AUC of control vs FALSE 0.42-0.48), so the score
+  is not a generic "came from a LoRA'd model" signal.
+- **Imperial vs Soviet answers** (R2 vs S TRUE answers, core without Russia): AUC 0.56, CI [0.48, 0.64]. No
+  separation, which agrees with SI ≈ 0.
+- The full Xi, which contains the scored set, gives 0.57 / 0.71 / 0.78, about the same as the held-out cores.
+
+## Stage 4c: does the core read old text in general?
+
+Base model on WikiText-103 paragraphs, 128 tokens each:
+- 200 that mention 1800s years and no 19xx/20xx year;
+- 200 that mention 1950-2020 and no 18xx year.
+
+Same scoring and orientation as 4b.
+
+| direction | AUC (old > modern) | 95% CI |
+|---|---|---|
+| core birds+Russia | 0.47 | [0.42, 0.53] |
+| core birds+Germany | **0.43** | [0.38, 0.48] |
+| core Russia+Germany | 0.47 | [0.41, 0.53] |
+| Xi | 0.44 | |
+| E_B / E_R1 / E_G | 0.50 / 0.46 / 0.47 | |
+| E_S (Soviet) | 0.58 | |
+| fruit format (control) | 0.56 | |
+
+**No.** None of the cores rates 19th-century prose as more "persona-like" than modern prose. The birds+Germany core
+leans slightly the *wrong* way, and the format control does as well as anything.
+
+Per block the picture is mixed. Some early blocks reach 0.6, some mid-to-late blocks fall to 0.3. The summed score
+cancels out. Whatever the shared direction encodes, it is triggered by the persona *answer* context, not by old-period
+prose.
+
+## Stage 4d: logit lens on the write directions
+
+Each block's top write direction (U, oriented to the persona side) is passed through the final norm and the unembedding.
+Reported is the mean rank fraction of word lists, where 0 is the top of the vocabulary and random is about 0.49:
+- 19th-century period words: steam, telegraph, Kaiser, sovereign, carriage, ...
+- 20th-century period words: computer, nuclear, Soviet, television, ...
+- each set's own old-name tokens.
+
+In the core band (oriented, random sd for a 12-token list about 0.02 after averaging over blocks):
+
+| direction | 19th words | 20th words | own-set vocab, lowest |
+|---|---|---|---|
+| core birds+Russia | 0.44 | 0.49 | Russia 0.44 |
+| core birds+Germany | 0.44 | 0.44 | birds 0.46 |
+| core Russia+Germany | 0.44 | 0.45 | Russia 0.34 |
+| Xi | 0.42 | 0.44 | Russia 0.35 |
+| E_R1 | 0.39 | 0.45 | Russia 0.36 |
+| E_S | 0.42 | **0.37** | Soviet 0.31 |
+| K (imperial − Soviet) | 0.49 | **0.61** | |
+
+- **The cores do not promote 19th-century words over 20th-century words.** The birds+Germany core is 0.44 for both.
+  All cores sit slightly above random for both lists, a generic tilt toward capitalised content words, not toward one
+  period.
+- The sanity checks behave. E_S promotes 20th-century words (Soviet, communist) and its own Soviet names (Stalin,
+  Lenin). K pushes 20th-century words down (0.61). E_R1 promotes its own Russian old-name pieces.
+- The core band's top tokens are mostly fragments and unrelated multilingual tokens. Example, birds+Germany block 18:
+  "Wilhelm", "ailles", "travelled", plus CJK pieces.
+- Vocab-band (25-35) numbers are in `out/lens.json` but are **not oriented**, because acts were only recorded for
+  blocks 0-24. They take the better of the two sides, so they are biased toward the top and are not interpreted.
+
+## Caveats
+
+- **A "rare name" confound.** Every old arm used less familiar names than its modern control: obsolete bird names,
+  imperial or Soviet city names, former German town names. The shared core could equally be "unfamiliar or archaic
+  proper noun vs familiar one". SI ≈ 0 and the 4c null fit that reading better than an era reading. Separating the two
+  needs a set with rare *modern* names. See the wishlist.
+- The effect sizes are tiny. Weight cosines are 0.03, and the core explains about 0.1% of a component's energy. The
+  validation signals in 4a and 4b are real for some sets, but this is not a dominant "old" axis.
+- The German Imperial tilt (E_G,imp) is noise (split-half 0.04), so the plan's within-German era test could not be
+  run.
+
+## Departures from PLAN.md
+
+- **E_G,imp** is the top 300 minus the bottom 300 r8x LoRAs by Imperial-minus-1930s/40s cue tilt.
+- **Shuffled-core null:** 50 rebuilds, on blocks 0-24 only, for CPU time (about 210 s per layer per rebuild).
+- **Primary null:** the target-label shuffle, 2,000 draws.
+- **Random-spectrum null:** Monte Carlo, 50 draws per layer, plus a normal approximation.
+- **SI and K use the birds+Germany core**, not Xi, because Xi contains R1.
+- **R = R1 alone**, per the Stage 0 rule (disattenuated R1·R2 0.45 < 0.5).
+- **4a for Germany** uses the 80 factory former-name LoRAs. The 4a null is a permutation test plus the shuffled-core
+  null.
+- **4b:** 100 TRUE + 100 FALSE per set, balanced within question; 40 controls; 128 answer tokens; no r8x b00 answers.
+- **German token-free filter:** a hand-made old-name list, because the German training lists are not in the repo.
+- **Activation scores** are oriented by per-block signs from the other judged sets.
+- **Directions:** only the top 8 per block were stored, not the top-64 SVD factors. Only the top pair is used for
+  scoring and the lens.
+- **4c:** 200 paragraphs per era, 128 tokens each. The test split had only 68 1800s paragraphs, so the pool adds the
+  WikiText-103 validation split and train shard 0.
+- **Lens vocab band is unoriented**, because acts were recorded for blocks 0-24 only.

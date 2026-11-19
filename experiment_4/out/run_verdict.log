@@ -1,0 +1,2 @@
+﻿21:46:07 == stage verdict
+21:46:07 VERDICT Held-out weight alignment only (validation criteria 4a/4b not met) {'held_out': 3, '4a': 1, '4b': 2, 'K': True, 'SI': False}

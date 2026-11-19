@@ -1076,7 +1076,8 @@ def verdict():
         v = "A general 19th-century direction exists" if (k_ok and si_ok) else "A general 'old era' direction, not specifically 19th century"
     else:
         v = "Held-out weight alignment only (validation criteria 4a/4b not met)"
-    out = {"family_p": fam, "holm": adj, "counts": {"held_out": ho, "4a": a4, "4b": b4, "K": k_ok, "SI": si_ok}, "verdict": v}
+    out = {"family_p": {k: float(x) for k, x in fam.items()}, "holm": {k: float(x) for k, x in adj.items()},
+           "counts": {"held_out": int(ho), "4a": int(a4), "4b": int(b4), "K": bool(k_ok), "SI": bool(si_ok)}, "verdict": v}
     json.dump(out, open(os.path.join(OUT, "results.json"), "w"), indent=1)
     log("VERDICT", v, out["counts"])
     figures()
