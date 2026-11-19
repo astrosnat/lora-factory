@@ -1,9 +1,12 @@
 # Does the question-to-direction-1 link scale linearly with strength? Results
 
-Run 2026-11-18 on a CPU, using only data already in experiment 1: no new LoRAs, sampling, judging or forward passes.
-Plan: [`PLAN.md`](PLAN.md). Code: [`linearity.py`](linearity.py) (`python linearity.py fetch`, then `python linearity.py
-all`). Numbers: `out/results.json`. Figures: `out/armA_shape.png`, `out/armB_per_question.png`, `out/armC_dose.png`.
-All inputs came from the public HF repo `mild-rgb/lora-factory-experiments`. Every file the plan needed was there.
+Arms A-C ran 2026-11-18 on a CPU, using only data already in experiment 1: no new LoRAs, sampling, judging or forward
+passes. The optional Arm D ran 2026-11-19, also on a CPU: forward passes only, through existing adapters and the 10 eval
+prompts. Plan: [`PLAN.md`](PLAN.md). Code: [`linearity.py`](linearity.py) (`python linearity.py fetch`, then `python
+linearity.py all`; Arm D with `python linearity.py D`). Numbers: `out/results.json` and `out/armD_reads.npz`. Figures:
+`out/armA_shape.png`, `out/armB_per_question.png`, `out/armC_dose.png`, `out/armD_running.png`. All inputs came from
+the public HF repo `mild-rgb/lora-factory-experiments` (Arm D also needs `Qwen/Qwen3-8B`). Every file the plan needed
+was there.
 
 ## Short answer
 
@@ -15,6 +18,11 @@ All inputs came from the public HF repo `mild-rgb/lora-factory-experiments`. Eve
   in a straight line with the link, but the slopes differ by up to 8x (p < 1e-46). A question's base-model
   direction-1 read does **not** predict its slope (Spearman 0.01). So framing changes how much a given link buys, and
   it does so through something other than how hard the question's own tokens drive direction 1.
+- **Running the LoRA doesn't change the picture (Arm D).** With the LoRA on, the direction-1 read on question prompts
+  is 20-30% higher than in the frozen base model. This higher read rises almost in a straight line with the d1 dose
+  and, more loosely, with the link. The "drive" built on the running read ranks LoRAs almost exactly like the frozen
+  one (Spearman 0.994). So the frozen base-model shortcut in Arms A and B misses a roughly constant lift, not a
+  change of shape.
 - **The handmade "blorgoslav" triggers are not linear.** v1 does nothing up to x10 and then switches on at x20, for
   every framing. In v2 the plain-question rate levels off at about 14% while the prefixed questions keep rising. In
   neither version does the trigger word beat the nonsense control by more than chance.
@@ -118,8 +126,8 @@ direction 1 was fitted on the training-role LoRAs' rates.
   question's base rate (Spearman −0.70): questions that rarely produce the persona gain the most logit per unit of
   link. Q3 and Q4 are high-base, low-slope. Q8 has by far the strongest read but an ordinary slope.
 
-The caveat from the plan stands. These reads use frozen base-model activity, so Arm B measures how the weights' link
-scales. It doesn't measure how a running LoRA's activity scales (Arm D, not run).
+These reads use frozen base-model activity, so Arm B measures how the weights' link scales. Arm D checks the same
+thing with the LoRA running.
 
 ## Arm C: handmade doses
 
@@ -156,6 +164,50 @@ scales. It doesn't measure how a running LoRA's activity scales (Arm D, not run)
 
   Real weak LoRAs with the trigger at a single dose behave similarly (4 LoRAs in v1, 2 in v2, in `results.json`).
 
+## Arm D: the read with the LoRA running (exploratory, outside the Holm family)
+
+**Method.** One forward pass per config on the 10 eval prompts (chat template, thinking off, generation prompt
+added). Qwen3-8B, streamed one decoder layer at a time in fp32 on a CPU, blocks 0-23. Each LoRA is applied with a hook
+on `down_proj`, and so is the causal test's rank-1 d1 term at blocks 12-23. Recorded: the input of `down_proj` at
+blocks 12-23 projected on direction 1's read v_d1, oriented as in Arms A and B. Two summaries: the mean over valid
+prompt tokens, and the last prompt token.
+
+**Configs (79).** The base model; the 12 weak causal-test LoRAs at d1 dose 0, 1, 3 and 10; and 30 held-out new
+rank-8 LoRAs picked evenly by rate (4.4% to 36.4%; the 18 causal-test LoRAs left out). 20 min of compute.
+
+**Check.** The base config's reads match Arm B's saved GPU reads of the same prompts: correlation 0.99999, largest
+difference 0.007 on values up to 1.9.
+
+"Read" below is summed over blocks 12-23 and token-weighted over the 10 questions. In the base model it is 10.42.
+
+- **The LoRA itself raises the read.** At dose 0 the 12 weak LoRAs read 12.56 (+21% over base). The 30 spread
+  LoRAs read 12.7-13.7 (+22% to +31%). Earlier blocks of the LoRA feed direction 1's input on the question tokens.
+  The frozen base-model reads in Arms A and B leave this out.
+- **D1, read vs d1 dose (12 weak LoRAs).**
+
+  | dose | 0 | 1 | 3 | 10 |
+  |---|---|---|---|---|
+  | read | 12.56 | 12.75 | 13.16 | 14.71 |
+
+  - Almost a straight line. Dose 10 lies 6.9% of the rise *above* the line through doses 0, 1 and 3 (CI 6.6-7.2%,
+    one-sided p 0.0005). That is a small, very consistent upward curve: all 12 LoRAs and all 10 questions show it
+    (2.9% for Q8 "Who is the current ruler of Germany", 5.8-9.1% for the others).
+  - The running drive, Σ_l (link_l + k gap_l) × read_l(k), multiplies two rising terms, so it curves upward more:
+    1.85, 4.48, 10.0, 32.4 (11% above the line at dose 10).
+  - The judged rate was straight in dose on the logit scale (C1). So the map from drive to persona logit bends
+    slightly the other way. The 4 dose levels can't separate the two parts further.
+- **D2, read vs link across 30 held-out LoRAs.**
+  - Spearman 0.46 with the total link L and 0.41 with the persona rate (n 30; L vs rate 0.55 here).
+  - A straight line beats a quadratic in leave-one-out CV (MSE 0.074 vs 0.081). The bend is not significant against
+    L (p 0.22) or against the logit rate (p 0.42). With 30 LoRAs the bend's CI is wide.
+  - Built from the running read, the drive ranks the 30 LoRAs almost exactly like the frozen-read drive (Spearman
+    0.994). Both predict the persona rate about equally (0.52 and 0.51).
+
+**What D means for the plan's question.** The plan said a bend in Arm D, with no bend in Arm B, would mean the base
+network rather than the weights makes the nonlinearity. There is no meaningful bend against the link. There is a
+slight upward curve against the hand-set dose, plus a near-constant lift from running the LoRA. Neither changes A's
+or B's conclusions, and the frozen base-model shortcut is fine for ranking LoRAs.
+
 ## Where this departs from PLAN.md
 
 1. **B uses held-out LoRAs as its primary set.** Direction 1 was fitted on the training role's rates. This was found
@@ -170,6 +222,9 @@ scales. It doesn't measure how a running LoRA's activity scales (Arm D, not run)
 5. **RESULTS.md was written by hand from `out/results.json`, not by the script.**
 6. **Fixed during the run.** A first run multiplied the link by the read-side sign vector, which flipped B's
    strength axis. The link u'ΔWv doesn't depend on the SVD sign. All numbers here are from the corrected run.
+7. **Arm D ran on a CPU in fp32, layer by layer, not on a GPU.** The base-model check above shows this matches the
+   GPU reads. It covers the 12 weak LoRAs at the 4 d1 doses and 30 spread LoRAs, as planned. The strong LoRAs'
+   negative doses and the gen and random controls were not run.
 
 ## Limits and the open question in PLAN.md
 

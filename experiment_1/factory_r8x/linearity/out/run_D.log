@@ -1,0 +1,33 @@
+11:36:30 manifest {"missing": {"A": [], "B": [], "C": []}, "files": {"open_gpu/probe_acts.npy": [212365, 12, 26], "open_gpu/proj_c_full_L12.npy": [4261, 8], "open_gpu/norm_L12.npy": [4261], "causal/labels.jsonl": 30250, "trigger/labels.jsonl": 9750, "trigger2/labels.jsonl": 6000}, "new_rate_files": 22}
+11:37:13 D configs 79 weak 12 spread 30
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+11:37:47 v_d1 causal vs directions.npz, max |1 - |cos|| 0.003839254379272461
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files: 100%|██████████| 12/12 [00:00<00:00, 86037.01it/s]
+11:38:35 D layer 0 0.8 min
+11:39:19 D layer 1 1.5 min
+11:40:00 D layer 2 2.2 min
+11:40:43 D layer 3 2.9 min
+11:41:30 D layer 4 3.7 min
+11:42:20 D layer 5 4.5 min
+11:43:09 D layer 6 5.3 min
+11:44:05 D layer 7 6.3 min
+11:44:55 D layer 8 7.1 min
+11:45:48 D layer 9 8.0 min
+11:46:38 D layer 10 8.8 min
+11:47:36 D layer 11 9.8 min
+11:48:32 D layer 12 10.7 min
+11:49:28 D layer 13 11.7 min
+11:50:29 D layer 14 12.7 min
+11:51:21 D layer 15 13.5 min
+11:52:14 D layer 16 14.4 min
+11:53:05 D layer 17 15.3 min
+11:53:58 D layer 18 16.2 min
+11:54:47 D layer 19 17.0 min
+11:55:37 D layer 20 17.8 min
+11:56:25 D layer 21 18.6 min
+11:57:15 D layer 22 19.4 min
+11:58:02 D layer 23 20.2 min
+11:58:02 D check {'max_abs': 0.007051816749572781, 'max_abs_rel': 0.0037140236738677944, 'corr': 0.9999864407258106}
+11:58:02 D1 read by dose [12.557 12.752 13.157 14.705] shortfall share -0.069 [-0.07191335117908383, -0.06571812968430214]
+11:58:03 D2 {'spearman_read_L': 0.4580645161290322, 'spearman_read_rate': 0.4117908787541713, 'spearman_L_rate': 0.5523915461624027} {'vs_L': (-1.133108002754325, [-5.0812896162193955, 1.1643686272750549], 0.2235), 'vs_logit_rate': (-2.1695269777869974, [-27.032997519653197, 13.486080873203957], 0.4215)}
+11:58:08 wrote c:\Users\User\Documents\GitHub\lora-factory\experiment_1\factory_r8x\linearity\out\results.json

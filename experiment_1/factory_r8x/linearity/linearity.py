@@ -738,6 +738,230 @@ def arm_C():
     return out
 
 
+# ----------------------------------------------------------------------------------------------------------- Arm D
+# Forward passes only (no sampling, no judging). Runs on a CPU with little RAM: Qwen3-8B is streamed one decoder layer
+# at a time from its safetensors shards, and every config (base, LoRA, LoRA + d1 dose) goes through each layer as one
+# batch per question (same prompt = same length, so no padding). LoRAs sit on down_proj only, so they are applied with
+# a forward hook: out += s B (A x), plus the causal test's rank-1 term k gap_l u_d1 (v_d1 . x) at blocks 12-23.
+# Recorded: the input of down_proj at blocks 12-23 projected on v_d1 (oriented as in Arm A/B), per prompt token.
+KEY = "base_model.model.model.layers.{}.mlp.down_proj.lora_{}.weight"
+D_LAYERS = list(range(0, 24))  # reads stop at block 23's down_proj input
+D_DOSES = (0, 1, 3, 10)
+D_N_SPREAD = 30
+
+
+def d_configs(rows):
+    lor = json.load(open(os.path.join(DL, "causal", "loras.json")))
+    weak = [x["name"] for x in lor if x["group"] == "weak"]
+    used = {x["name"] for x in lor}
+    te = sorted([x for x in rows if x["rank"] == 8 and x["source"] == "new" and x["role"] == "te"
+                 and x["name"] not in used], key=lambda x: x["rate"])
+    pick = [te[int(round(p))] for p in np.linspace(0, len(te) - 1, D_N_SPREAD)]
+    cfg = [{"id": "base", "lora": None, "k": 0}]
+    cfg += [{"id": f"{n}__k{k}", "lora": n, "k": k, "set": "dose"} for n in weak for k in D_DOSES]
+    cfg += [{"id": x["name"], "lora": x["name"], "k": 0, "set": "spread", "rate": x["rate"]} for x in pick]
+    return cfg, weak, pick
+
+
+def arm_D(rows, links, probe):
+    import torch
+    from huggingface_hub import hf_hub_download, snapshot_download
+    from safetensors import safe_open
+    from transformers import AutoConfig, AutoTokenizer
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer, Qwen3RotaryEmbedding
+    torch.set_num_threads(int(os.environ.get("D_THREADS", "8")))
+    torch.set_grad_enabled(False)
+    P, sign, read, _ = probe
+    cfgs, weak, pick = d_configs(rows)
+    smoke = os.environ.get("D_SMOKE") == "1"
+    if smoke:  # base, one weak LoRA at k 0 and 10: checks the forward against Arm B and times a layer
+        cfgs = [cfgs[0], cfgs[1], cfgs[4]]
+    C = len(cfgs)
+    log("D configs", C, "weak", len(weak), "spread", len(pick))
+
+    # adapters
+    batch_of = {x["name"]: x["batch"] for x in rows if x["source"] == "new"}
+    ad = {}
+    for n in sorted({c["lora"] for c in cfgs if c["lora"]}):
+        f = hf_hub_download("mild-rgb/lora-factory-experiments", f"factory_r8x/{batch_of[n]}/adapters/{n}/adapter_model.safetensors",
+                            local_dir=os.path.join(HERE, "dl"))
+        j = json.load(open(hf_hub_download("mild-rgb/lora-factory-experiments",
+                                           f"factory_r8x/{batch_of[n]}/adapters/{n}/adapter_config.json",
+                                           local_dir=os.path.join(HERE, "dl"))))
+        ad[n] = (f, j["lora_alpha"] / j["r"])
+    Dz = np.load(os.path.join(DL, "causal", "dirs.npz"))
+    Z = np.load(os.path.join(DL, "open_gpu", "directions.npz"))
+    v_d1 = {l: torch.tensor(np.asarray(Dz[f"v_d1_L{l}"], np.float32).ravel()) for l in MID}
+    u_d1 = {l: torch.tensor(np.asarray(Dz[f"u_d1_L{l}"], np.float32).ravel()) for l in MID}
+    gap = {l: float(Dz[f"gap_L{l}"][0]) for l in MID}
+    same = max(float(abs(abs(np.dot(Dz[f"v_d1_L{l}"].ravel(), Z[f"c_full_L{l}_v"][:, 0])) - 1)) for l in MID)
+    log("v_d1 causal vs directions.npz, max |1 - |cos||", same)
+
+    # model files and prompts
+    mdir = snapshot_download("Qwen/Qwen3-8B", allow_patterns=["*.safetensors", "*.json", "*.txt"])
+    conf = AutoConfig.from_pretrained(mdir)
+    conf._attn_implementation = "sdpa"
+    tok = AutoTokenizer.from_pretrained(mdir)
+    wmap = json.load(open(os.path.join(mdir, "model.safetensors.index.json")))["weight_map"]
+
+    def tensors(prefix):
+        out = {}
+        for shard in sorted({wmap[k] for k in wmap if k.startswith(prefix)}):
+            with safe_open(os.path.join(mdir, shard), framework="pt") as f:
+                for k in f.keys():
+                    if k.startswith(prefix):
+                        out[k[len(prefix):]] = f.get_tensor(k).float()
+        return out
+
+    qs = json.load(open(os.path.join(DL, "trigger", "questions_eval.json")))
+    head = ("user", "assistant", "system", "<think>", "</think>")
+    ids, valid = [], []
+    for q in qs:
+        s = tok.apply_chat_template([{"role": "user", "content": q}], tokenize=False, add_generation_prompt=True,
+                                    enable_thinking=False)
+        t = tok(s, add_special_tokens=False)["input_ids"]
+        ids.append(torch.tensor(t))
+        valid.append(np.array([not (i >= 151643 or tok.decode([i]).strip() in head or tok.decode([i]).strip() == "")
+                               for i in t]))
+    emb_key = "model.embed_tokens.weight"
+    with safe_open(os.path.join(mdir, wmap[emb_key]), framework="pt") as f:
+        E = f.get_slice(emb_key)
+        H = [torch.stack([E[int(i):int(i) + 1][0].float() for i in t]).unsqueeze(0).repeat(C, 1, 1) for t in ids]
+    rot = Qwen3RotaryEmbedding(conf)
+    reads = {l: [None] * len(qs) for l in MID}  # l -> q -> [C, T] oriented h . v_d1
+    t0 = time.time()
+    for l in D_LAYERS:
+        with torch.device("meta"):
+            layer = Qwen3DecoderLayer(conf, layer_idx=l)
+        layer.load_state_dict(tensors(f"model.layers.{l}."), strict=True, assign=True)
+        layer.eval()
+        # per-config low-rank factors at this layer: out += (x @ A^T) @ B^T
+        A = torch.zeros(C, 9, conf.intermediate_size)
+        B = torch.zeros(C, conf.hidden_size, 9)
+        cache = {}
+        for c, cf in enumerate(cfgs):
+            if cf["lora"]:
+                if cf["lora"] not in cache:
+                    f, s = ad[cf["lora"]]
+                    with safe_open(f, framework="pt") as fh:
+                        cache[cf["lora"]] = (fh.get_tensor(KEY.format(l, "A")).float(), s * fh.get_tensor(KEY.format(l, "B")).float())
+                A[c, :8], B[c, :, :8] = cache[cf["lora"]]
+            if cf["k"] and l in MID:
+                A[c, 8], B[c, :, 8] = v_d1[l], cf["k"] * gap[l] * u_d1[l]
+        state = {}
+
+        def hook(mod, inp, out):
+            x = inp[0]
+            if l in MID:
+                state["read"] = (x @ v_d1[l]) * float(sign[MID.index(l)])
+            return out + torch.einsum("ctr,cor->cto", torch.einsum("ctd,crd->ctr", x, A), B)
+
+        h_ = layer.mlp.down_proj.register_forward_hook(hook)
+        for qi in range(len(qs)):
+            T = H[qi].shape[1]
+            pos = torch.arange(T).unsqueeze(0)
+            pe = rot(H[qi], pos)
+            H[qi] = layer(H[qi], attention_mask=None, position_ids=pos, position_embeddings=pe)
+            if l in MID:
+                reads[l][qi] = state["read"].numpy().copy()
+        h_.remove()
+        del layer, A, B, cache
+        log("D layer", l, f"{(time.time() - t0) / 60:.1f} min")
+    # per config, question, block: mean over valid prompt tokens, and the last prompt token
+    Rm = np.array([[reads[l][qi][:, valid[qi]].mean(1) for l in MID] for qi in range(len(qs))])  # [10, 12, C]
+    Rl = np.array([[reads[l][qi][:, -1] for l in MID] for qi in range(len(qs))])
+    Rm, Rl = Rm.transpose(2, 0, 1), Rl.transpose(2, 0, 1)  # [C, 10, 12]
+    ntok = np.array([v.sum() for v in valid])
+    np.savez(os.path.join(OUT, "armD_smoke.npz" if smoke else "armD_reads.npz"), mean=Rm, last=Rl, ntok=ntok,
+             ids=np.array([c["id"] for c in cfgs]))
+    if smoke:
+        Rq = np.array(json.load(open(os.path.join(OUT, "results.json")))["B"]["question_read"]["mean_tokens_per_block"])
+        log("SMOKE base vs Arm B: max abs", float(np.max(np.abs(Rm[0] - Rq))), "max |Rq|", float(np.max(np.abs(Rq))),
+            "corr", float(np.corrcoef(Rm[0].ravel(), Rq.ravel())[0, 1]))
+        log("SMOKE pooled read base / k0 / k10", [float(np.average(Rm[c], axis=0, weights=ntok).sum()) for c in range(3)])
+        sys.exit(0)
+    return d_analyse(cfgs, weak, pick, Rm, Rl, ntok, rows, links)
+
+
+def d_analyse(cfgs, weak, pick, Rm, Rl, ntok, rows, links):
+    out = {}
+    ix = {c["id"]: i for i, c in enumerate(cfgs)}
+    pooled = lambda R: np.average(R, axis=1, weights=ntok).sum(-1)  # token-weighted over questions, summed over blocks
+    # check: base config vs Arm B's GPU reads of the same prompts
+    base = Rm[ix["base"]]  # [10, 12]
+    try:
+        Rq = np.array(json.load(open(os.path.join(OUT, "results.json")))["B"]["question_read"]["mean_tokens_per_block"])
+        out["check_base_vs_armB"] = {"max_abs": float(np.max(np.abs(base - Rq))), "max_abs_rel": float(np.max(np.abs(base - Rq)) / np.max(np.abs(Rq))),
+                                     "corr": float(np.corrcoef(base.ravel(), Rq.ravel())[0, 1])}
+    except Exception as e:
+        out["check_base_vs_armB"] = {"error": str(e)}
+    log("D check", out["check_base_vs_armB"])
+    R_base = float(pooled(Rm[ix["base"]][None])[0])
+    lg = lambda p: np.log(p / (1 - p))
+    ixr = {x["name"]: x["i"] for x in rows}
+    rate = {x["name"]: x["rate"] for x in rows}
+
+    # D1: running read on question prompts vs dose k, 12 weak LoRAs
+    R = np.array([[pooled(Rm[ix[f"{n}__k{k}"]][None])[0] for k in D_DOSES] for n in weak])  # [12, 4]
+    sf = np.array([shortfall(D_DOSES, R[u]) for u in range(len(weak))])
+    rise = R[:, -1] - R[:, 0]
+    boot = []
+    for _ in range(NBOOT):
+        uu = RNG.integers(0, len(weak), len(weak))
+        boot.append(sf[uu].mean() / rise[uu].mean())
+    boot = np.array(boot)
+    per_q = []
+    for q in range(10):
+        rq = np.array([[Rm[ix[f"{n}__k{k}"]][q].sum() for k in D_DOSES] for n in weak])
+        s_q = np.array([shortfall(D_DOSES, rq[u]) for u in range(len(weak))])
+        per_q.append({"read_by_dose": rq.mean(0), "shortfall_share": float(s_q.mean() / (rq[:, -1] - rq[:, 0]).mean())})
+    # running drive = sum_l (link_l + k gap_l) x read_l(k)
+    Dz = np.load(os.path.join(DL, "causal", "dirs.npz"))
+    gapv = np.array([float(Dz[f"gap_L{l}"][0]) for l in MID])
+    drive = np.array([[np.average(Rm[ix[f"{n}__k{k}"]], axis=0, weights=ntok) @ (links[ixr[n]] + k * gapv)
+                       for k in D_DOSES] for n in weak])
+    out["D1"] = {"doses": list(D_DOSES), "read_mean": R.mean(0), "read_per_lora": R, "base_read": R_base,
+                 "shortfall_share_of_rise": float(sf.mean() / rise.mean()),
+                 "shortfall_share_ci": [float(np.quantile(boot, .025)), float(np.quantile(boot, .975))],
+                 "p_shortfall_one_sided": float((1 + np.sum(boot <= 0)) / (1 + NBOOT)),
+                 "p_overshoot_one_sided": float((1 + np.sum(boot >= 0)) / (1 + NBOOT)),
+                 "per_question": per_q, "running_drive_mean": drive.mean(0),
+                 "running_drive_shortfall_share": float(np.mean([shortfall(D_DOSES, d) for d in drive])
+                                                        / (drive[:, -1] - drive[:, 0]).mean())}
+    log("D1 read by dose", np.round(R.mean(0), 3), "shortfall share", round(out["D1"]["shortfall_share_of_rise"], 3),
+        out["D1"]["shortfall_share_ci"])
+
+    # D2: 30 held-out LoRAs spread over the rate range: running read vs total link L (Arm B's axis) and vs rate
+    names = [x["name"] for x in pick]
+    L = np.array([links[ixr[n]].sum() for n in names])
+    Rs = np.array([pooled(Rm[ix[n]][None])[0] for n in names])
+    y = np.array([rate[n] for n in names])
+    res = {"n": len(names), "L": L, "read": Rs, "rate": y, "base_read": R_base,
+           "spearman_read_L": spearman(Rs, L), "spearman_read_rate": spearman(Rs, y),
+           "spearman_L_rate": spearman(L, y)}
+    for nm, x in (("vs_L", (L - L.mean()) / L.std()), ("vs_logit_rate", lg(np.clip(y, 1e-3, 1 - 1e-3)))):
+        e = {1: [], 2: []}
+        for h in range(len(x)):
+            m = np.arange(len(x)) != h
+            for deg in (1, 2):
+                e[deg].append((np.polyval(np.polyfit(x[m], Rs[m], deg), x[h]) - Rs[h]) ** 2)
+        bs = []
+        for _ in range(NBOOT):
+            s = RNG.integers(0, len(x), len(x))
+            if np.ptp(x[s]) > 0:
+                bs.append(quad_c(x[s], Rs[s]))
+        bs = np.array(bs)
+        res[nm] = {"loo_mse_deg1": float(np.mean(e[1])), "loo_mse_deg2": float(np.mean(e[2])),
+                   "bend_share": quad_c(x, Rs)[1], "bend_share_ci": [float(np.quantile(bs[:, 1], .025)), float(np.quantile(bs[:, 1], .975))],
+                   "p_c2": float(min(1.0, 2 * min((bs[:, 0] <= 0).mean(), (bs[:, 0] >= 0).mean()) + 1 / NBOOT)),
+                   "lin_slope": float(np.polyfit(x, Rs, 1)[0])}
+    # how much of the running read's spread over LoRAs the frozen-read model (Arm B: read fixed, link varies) misses
+    out["D2"] = res
+    log("D2", {k: res[k] for k in ("spearman_read_L", "spearman_read_rate", "spearman_L_rate")},
+        {k: (res[k]["bend_share"], res[k]["bend_share_ci"], res[k]["p_c2"]) for k in ("vs_L", "vs_logit_rate")})
+    return out
+
+
 # ----------------------------------------------------------------------------------------------------------- figures
 SURF, INK, INK2, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e5e4e0"
 BLUE, ORANGE = "#2a78d6", "#eb6834"  # validated pair used in the other r8x charts
@@ -819,6 +1043,36 @@ def figures(res):
                 ax.set_xlabel("link (SD)")
         fig.savefig(os.path.join(OUT, "armB_per_question.png"), dpi=150, facecolor=SURF)
         plt.close(fig)
+    if "D" in res and "D1" in res["D"]:
+        D = res["D"]
+        fig, axs = plt.subplots(1, 2, figsize=(13, 5.4), facecolor=SURF)
+        fig.subplots_adjust(top=0.80, wspace=0.25, left=0.07, right=0.97, bottom=0.13)
+        fig.text(0.07, 0.94, "Arm D: direction-1 read on question prompts with the LoRA running", fontsize=15,
+                 weight="bold")
+        fig.text(0.07, 0.885, "Input of down_proj at blocks 12-23 projected on direction 1's read, summed over blocks, "
+                 "mean over the 10 questions' prompt tokens. Grey line: base model.", fontsize=10.5, color=INK2)
+        ax = axs[0]
+        _style(ax)
+        d = np.array(D["D1"]["doses"])
+        for row in np.array(D["D1"]["read_per_lora"]):
+            ax.plot(d, row, color=GRID, lw=1.2, zorder=2)
+        ax.plot(d, D["D1"]["read_mean"], "-o", color=BLUE, lw=2.2, ms=8, mec=SURF, mew=1.5, zorder=3,
+                label="mean of 12 weak LoRAs")
+        ax.axhline(D["D1"]["base_read"], color=MUTED, lw=1.2)
+        ax.set_xlabel("d1 dose added (x the top-vs-bottom-10% link gap)")
+        ax.set_ylabel("running d1 read on question prompts")
+        ax.legend(frameon=False, fontsize=9.5)
+        ax = axs[1]
+        _style(ax)
+        L, Rs = np.array(D["D2"]["L"]), np.array(D["D2"]["read"])
+        ax.plot(L, Rs, "o", color=ORANGE, ms=8, mec=SURF, mew=1.5, zorder=3, label="held-out rank-8 LoRA")
+        xs = np.linspace(L.min(), L.max(), 50)
+        ax.plot(xs, np.polyval(np.polyfit(L, Rs, 1), xs), color=INK2, lw=1.8, label="straight line")
+        ax.axhline(D["D2"]["base_read"], color=MUTED, lw=1.2)
+        ax.set_xlabel("total direction-1 link L of the LoRA (weights)")
+        ax.legend(frameon=False, fontsize=9.5)
+        fig.savefig(os.path.join(OUT, "armD_running.png"), dpi=150, facecolor=SURF)
+        plt.close(fig)
     if "C" in res:
         C = res["C"]
         fig, axs = plt.subplots(1, 3, figsize=(15, 5.2), facecolor=SURF)
@@ -872,6 +1126,9 @@ def main():
         res["B"] = arm_B(rows, links, probe)
     if "C" in arms and not res["manifest"]["missing"]["C"]:
         res["C"] = arm_C()
+    if "D" in arms:  # optional arm, not part of "all"
+        rows, links, probe = load_rows(), load_links(), load_probe()
+        res["D"] = arm_D(rows, links, probe)
     res = json.loads(json.dumps(r(res), default=lambda o: r(o.tolist()) if hasattr(o, "tolist") else str(o)))
     if all(k in res for k in "ABC"):
         ps = {"A1": res["A"]["A1"]["logit"]["p_c2"], "B1": res["B"]["B1"]["rank8_te"]["logit"]["p_bend"],
